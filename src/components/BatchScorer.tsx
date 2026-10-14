@@ -226,11 +226,11 @@ export default function BatchScorer() {
     [repoUrlList, repoAccess],
   );
 
-  const serverErrorCount = useMemo(
+  const unreachableCount = useMemo(
     () =>
       rows.filter((r) => {
         const status = linkStatus[r.cosmocodeUrl.trim()]?.status;
-        return status !== undefined && status >= 500;
+        return status !== undefined && (status === 0 || status >= 400);
       }).length,
     [rows, linkStatus],
   );
@@ -503,7 +503,7 @@ export default function BatchScorer() {
               链接格式校验：
               {invalidLinkCount > 0 ? (
                 <span className="text-rose-600">
-                  {invalidLinkCount} 个链接有误（红色标记），点击单元格可修改，需确认后生效；COSMO Code应用链接无效或未填将直接计 0 分
+                  {invalidLinkCount} 个链接有误（红色标记），点击单元格可修改，需确认后生效；COSMO Code应用链接无效、未填或不可访问将直接计 0 分
                 </span>
               ) : (
                 <span className="text-emerald-600">三个链接格式均正确</span>
@@ -529,9 +529,9 @@ export default function BatchScorer() {
                 <span className="text-indigo-500">正在根据 COSMO Code 应用链接读取并匹配应用名称…</span>
               </p>
             )}
-            {serverErrorCount > 0 && (
+            {unreachableCount > 0 && (
               <p className="mb-1.5 text-xs text-amber-600">
-                有 {serverErrorCount} 个 COSMO Code 应用链接返回 HTTP 500（黄色标记），请确认应用是否正常运行
+                有 {unreachableCount} 个 COSMO Code 应用链接不可访问（黄色标记），将直接计 0 分
               </p>
             )}
             <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -600,9 +600,13 @@ export default function BatchScorer() {
                               ? linkStatus[raw.trim()]
                               : undefined;
                           const isWarn =
-                            !isError && !!linkInfo && linkInfo.status >= 500;
+                            !isError &&
+                            !!linkInfo &&
+                            (linkInfo.status === 0 || linkInfo.status >= 400);
                           const warnMsg = isWarn
-                            ? `应用链接返回 HTTP ${linkInfo!.status}，请确认应用是否正常运行`
+                            ? linkInfo!.status
+                              ? `应用链接不可访问（HTTP ${linkInfo!.status}），将计 0 分`
+                              : "应用链接无法访问，将计 0 分"
                             : undefined;
                           return (
                             <td

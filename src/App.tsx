@@ -135,8 +135,12 @@ function SingleScorer() {
     try {
       const res = await resolveAppNames([url]);
       const info = res[url];
-      if (info && info.status >= 500) {
-        setAppLinkWarn(`应用链接返回 HTTP ${info.status}，请确认应用是否正常运行`);
+      if (info && (info.status === 0 || info.status >= 400)) {
+        setAppLinkWarn(
+          info.status
+            ? `应用链接不可访问（HTTP ${info.status}），将直接计 0 分`
+            : "应用链接无法访问，将直接计 0 分",
+        );
       }
       if (info?.name) {
         setAutoName(info.name);

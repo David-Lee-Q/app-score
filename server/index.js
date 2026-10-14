@@ -102,6 +102,23 @@ function decodeEntities(input) {
 
 const PLATFORM_TITLE = /卡奥斯\s*COSMO\s*Code|COSMO\s*Code-AI|智能代码生成平台/i;
 
+async function probeAppLink(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 PreReviewBot/1.0" },
+    });
+    return { status: resp.status, ok: resp.ok };
+  } catch (err) {
+    return { status: 0, ok: false, error: err.message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function resolveAppName(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
@@ -584,6 +601,14 @@ app.post("/api/score", async (req, res) => {
       appCheck.status === "empty"
         ? "未填写 COSMO Code应用链接，按规则直接计 0 分。"
         : `COSMO Code应用链接格式无效（${appCheck.message}），按规则直接计 0 分。`;
+    return res.json(zeroReport(dimensions, LLM_MODEL, links, reason));
+  }
+
+  const reach = await probeAppLink(links.cosmocodeUrl);
+  if (!reach.ok) {
+    const reason = reach.status
+      ? `COSMO Code应用链接不可访问（HTTP ${reach.status}），按规则直接计 0 分。`
+      : "COSMO Code应用链接无法访问，按规则直接计 0 分。";
     return res.json(zeroReport(dimensions, LLM_MODEL, links, reason));
   }
 
