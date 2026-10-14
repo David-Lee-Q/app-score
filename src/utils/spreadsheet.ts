@@ -173,6 +173,10 @@ function buildResultsCsv(
     "开源加分",
     "定向赛题加分",
     "综合总分",
+    ...dimensions.map((d) => `${d.name}评分依据`),
+    "开源加分依据",
+    "定向加分依据",
+    "综合评价",
     "状态",
     "备注",
   ];
@@ -181,11 +185,21 @@ function buildResultsCsv(
     const scoreByKey = new Map(
       (item.report?.dimensions ?? []).map((d) => [d.key, d.score]),
     );
+    const reasonByKey = new Map(
+      (item.report?.dimensions ?? []).map((d) => [d.key, d.reason]),
+    );
     const dimensionCells = dimensions.map((d) => {
       const score = scoreByKey.get(d.key);
       return score === undefined ? "" : String(score);
     });
-    const note = item.error ?? item.report?.summary ?? "";
+    const dimensionReasons = dimensions.map((d) => reasonByKey.get(d.key) ?? "");
+    const openSourceReason = item.report?.openSourceReason ?? "";
+    const directedReason = item.report
+      ? item.report.directedTopicBonus > 0
+        ? `属于定向揭榜赛题，加 ${item.report.directedTopicBonus} 分`
+        : "非定向揭榜赛题，不加定向分"
+      : "";
+    const overall = item.report?.summary ?? "";
     return [
       item.name,
       item.track,
@@ -198,8 +212,12 @@ function buildResultsCsv(
       item.report ? String(item.report.openSourceBonus) : "",
       item.report ? String(item.report.directedTopicBonus) : "",
       item.report ? String(Math.round(item.report.total)) : "",
+      ...dimensionReasons,
+      openSourceReason,
+      directedReason,
+      overall,
       statusLabel(item.status),
-      note,
+      item.error ?? "",
     ];
   });
 
