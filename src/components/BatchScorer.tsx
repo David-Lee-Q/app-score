@@ -134,6 +134,7 @@ export default function BatchScorer() {
   const [autoNamedUrls, setAutoNamedUrls] = useState<Set<string>>(new Set());
   const attemptedNames = useRef<Set<string>>(new Set());
   const [resolvingNames, setResolvingNames] = useState(false);
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
   const dragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(
     null,
   );
@@ -253,6 +254,11 @@ export default function BatchScorer() {
         const filled = new Set(pending.filter((u) => results[u]?.name));
         if (filled.size) {
           setAutoNamedUrls((prev) => new Set([...prev, ...filled]));
+          setResolvedNames((prev) => {
+            const next = { ...prev };
+            for (const u of filled) next[u] = results[u].name;
+            return next;
+          });
         }
       })
       .catch(() => {})
@@ -307,8 +313,42 @@ export default function BatchScorer() {
     setRunning(true);
     setError("");
 
+    let names = resolvedNames;
+    const missing = [
+      ...new Set(
+        rows
+          .filter(
+            (r) =>
+              !r.name.trim() &&
+              r.cosmocodeUrl.trim() &&
+              validateLink("cosmocodeUrl", r.cosmocodeUrl).status === "ok",
+          )
+          .map((r) => r.cosmocodeUrl.trim())
+          .filter((u) => !names[u]),
+      ),
+    ];
+    if (missing.length) {
+      setResolvingNames(true);
+      try {
+        const res = await resolveAppNames(missing);
+        const add: Record<string, string> = {};
+        for (const u of missing) if (res[u]?.name) add[u] = res[u].name;
+        names = { ...resolvedNames, ...add };
+        setResolvedNames(names);
+        const filledUrls = missing.filter((u) => names[u]);
+        if (filledUrls.length) {
+          setAutoNamedUrls((prev) => new Set([...prev, ...filledUrls]));
+        }
+      } catch {
+        // 匹配失败时忽略，评分仍可继续
+      } finally {
+        setResolvingNames(false);
+      }
+    }
+
     const results: BatchItemResult[] = rows.map((r) => ({
       ...r,
+      name: r.name.trim() || names[r.cosmocodeUrl.trim()] || "",
       track: r.track.trim(),
       topic: r.topic.trim(),
       status: "pending",
