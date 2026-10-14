@@ -66,8 +66,7 @@ app.delete("/api/history/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/check-repos", async (req, res) => {
-  const urls = Array.isArray(req.body?.urls)
+app.post("/api/check-repos", async (req, res) => {  const urls = Array.isArray(req.body?.urls)
     ? req.body.urls.filter((u) => typeof u === "string" && u.trim())
     : [];
   if (!urls.length) return res.json({ results: {} });
@@ -83,6 +82,68 @@ app.post("/api/check-repos", async (req, res) => {
         results[url] = await probeRepoAccess(url);
       } catch {
         results[url] = { accessible: false, private: true, status: 0, note: "探测失败" };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, unique.length) }, worker));
+  res.json({ results });
+});
+
+function decodeEntities(input) {
+  return input
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+}
+
+const PLATFORM_TITLE = /卡奥斯\s*COSMO\s*Code|COSMO\s*Code-AI|智能代码生成平台/i;
+
+async function resolveAppName(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 PreReviewBot/1.0" },
+    });
+    if (!resp.ok) return { name: "", note: `HTTP ${resp.status}` };
+    const html = (await resp.text()).slice(0, 300000);
+    const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = match ? decodeEntities(match[1]).replace(/\s+/g, " ").trim() : "";
+    if (!title) return { name: "", note: "未找到页面标题" };
+    if (PLATFORM_TITLE.test(title)) {
+      return { name: "", note: "页面为平台默认标题，无法匹配应用名称" };
+    }
+    return { name: title, note: "" };
+  } catch (err) {
+    return { name: "", note: err.message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.post("/api/resolve-names", async (req, res) => {
+  const urls = Array.isArray(req.body?.urls)
+    ? req.body.urls.filter((u) => typeof u === "string" && u.trim())
+    : [];
+  if (!urls.length) return res.json({ results: {} });
+
+  const unique = [...new Set(urls.map((u) => u.trim()))];
+  const results = {};
+  const limit = 5;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < unique.length) {
+      const url = unique[cursor++];
+      try {
+        results[url] = await resolveAppName(url);
+      } catch {
+        results[url] = { name: "", note: "解析失败" };
       }
     }
   }

@@ -66,6 +66,27 @@ export interface RepoAccess {
   note: string;
 }
 
+export interface NameResolution {
+  name: string;
+  note: string;
+}
+
+export async function resolveAppNames(
+  urls: string[],
+): Promise<Record<string, NameResolution>> {
+  if (!urls.length) return {};
+  const res = await fetch("/api/resolve-names", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  if (!res.ok) {
+    throw new Error(`应用名称匹配失败（HTTP ${res.status}）`);
+  }
+  const data = (await res.json()) as { results?: Record<string, NameResolution> };
+  return data.results ?? {};
+}
+
 export async function checkRepos(urls: string[]): Promise<Record<string, RepoAccess>> {
   if (!urls.length) return {};
   const res = await fetch("/api/check-repos", {

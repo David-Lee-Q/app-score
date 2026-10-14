@@ -1,5 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { checkRepos, requestCalibrate, requestScore, type RepoAccess } from "@/api/score";
+import {
+  checkRepos,
+  requestCalibrate,
+  requestScore,
+  resolveAppNames,
+  type RepoAccess,
+} from "@/api/score";
 import Button from "@/components/Button";
 import { SCORE_DIMENSIONS } from "@/config/dimensions";
 import type { ApplicationRow, BatchItemResult, HistoryEntry, ScoreReport } from "@/types";
@@ -125,6 +131,9 @@ export default function BatchScorer() {
   );
   const [repoAccess, setRepoAccess] = useState<Record<string, RepoAccess>>({});
   const [checkingRepos, setCheckingRepos] = useState(false);
+  const [autoNamedUrls, setAutoNamedUrls] = useState<Set<string>>(new Set());
+  const attemptedNames = useRef<Set<string>>(new Set());
+  const [resolvingNames, setResolvingNames] = useState(false);
   const dragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(
     null,
   );
@@ -212,6 +221,48 @@ export default function BatchScorer() {
     () => repoUrlList.filter((u) => repoAccess[u]?.private).length,
     [repoUrlList, repoAccess],
   );
+
+  useEffect(() => {
+    const pending = [
+      ...new Set(
+        rows
+          .filter(
+            (r) =>
+              !r.name.trim() &&
+              r.cosmocodeUrl.trim() &&
+              validateLink("cosmocodeUrl", r.cosmocodeUrl).status === "ok",
+          )
+          .map((r) => r.cosmocodeUrl.trim())
+          .filter((u) => !attemptedNames.current.has(u)),
+      ),
+    ];
+    if (!pending.length) return;
+    pending.forEach((u) => attemptedNames.current.add(u));
+    let cancelled = false;
+    setResolvingNames(true);
+    resolveAppNames(pending)
+      .then((results) => {
+        if (cancelled) return;
+        setRows((prev) =>
+          prev.map((r) => {
+            if (r.name.trim()) return r;
+            const resolved = results[r.cosmocodeUrl.trim()];
+            return resolved?.name ? { ...r, name: resolved.name } : r;
+          }),
+        );
+        const filled = new Set(pending.filter((u) => results[u]?.name));
+        if (filled.size) {
+          setAutoNamedUrls((prev) => new Set([...prev, ...filled]));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setResolvingNames(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rows]);
 
   function applyEdit() {
     if (!edit) return;
@@ -418,6 +469,12 @@ export default function BatchScorer() {
                 )}
               </p>
             )}
+            {resolvingNames && (
+              <p className="mb-1.5 text-xs text-slate-400">
+                应用名称匹配中：
+                <span className="text-indigo-500">正在根据 COSMO Code 应用链接读取并匹配应用名称…</span>
+              </p>
+            )}
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table
                 className="table-fixed text-left text-sm"
@@ -535,7 +592,21 @@ export default function BatchScorer() {
                               ) : (
                                 <>
                                   {isError && <span className="mr-1">⚠</span>}
-                                  {col.key === "name" ? raw : raw || "—"}
+                                  {col.key === "name" ? (
+                                    <span className="flex items-center gap-1">
+                                      <span className="truncate">{raw}</span>
+                                      {raw && autoNamedUrls.has(row.cosmocodeUrl.trim()) && (
+                                        <span
+                                          className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
+                                          title="根据 COSMO Code 应用链接自动匹配"
+                                        >
+                                          自动
+                                        </span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    raw || "—"
+                                  )}
                                 </>
                               )}
                             </td>
