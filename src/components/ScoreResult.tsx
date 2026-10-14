@@ -122,7 +122,7 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
       </div>
 
       <p className="text-xs leading-relaxed text-slate-500">
-        总分 = 五维加权分（满分 100）+ 开源加分（共享开源代码仓且代码与参赛作品一致，最高 5）+ 定向揭榜赛题加分（参选前三个赛题，10）。
+        总分 = 五维加权分（满分 100）+ 开源加分（共享开源代码仓且代码与参赛作品一致，最高 5；GitHub 代码仓不加分）+ 定向揭榜赛题加分（参选前三个赛题，10）。
         {report.openSourceReason ? ` 开源判定：${report.openSourceReason}` : ""}
       </p>
 

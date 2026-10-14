@@ -475,9 +475,20 @@ function toSources(pages) {
   }));
 }
 
+function isGitHubRepo(url) {
+  try {
+    const host = new URL(String(url || "").trim()).hostname.toLowerCase();
+    return host === "github.com" || host === "www.github.com";
+  } catch {
+    return false;
+  }
+}
+
 function bonusBreakdown(fiveDimScore, repoUrl, repoConsistent, topic) {
   const hasRepo = Boolean((repoUrl || "").trim());
-  const openSourceBonus = hasRepo && repoConsistent ? OPEN_SOURCE_BONUS : 0;
+  const githubRepo = hasRepo && isGitHubRepo(repoUrl);
+  const openSourceBonus =
+    hasRepo && repoConsistent && !githubRepo ? OPEN_SOURCE_BONUS : 0;
   const directedTopicBonus = DIRECTED_TOPICS.includes(String(topic || "").trim())
     ? DIRECTED_TOPIC_BONUS
     : 0;
@@ -517,11 +528,15 @@ function normalize(parsed, dimensions, mode, model, sources = [], context = {}) 
     context.topic,
   );
 
+  const repoTrimmed = String(context.repoUrl || "").trim();
+  const githubRepo = Boolean(repoTrimmed) && isGitHubRepo(repoTrimmed);
+
   return {
     ...bonus,
-    openSourceReason:
-      (parsed && typeof parsed.repoConsistentReason === "string" && parsed.repoConsistentReason.trim()) ||
-      "",
+    openSourceReason: githubRepo
+      ? "代码仓为 GitHub 地址，按规则不加开源加分。"
+      : (parsed && typeof parsed.repoConsistentReason === "string" && parsed.repoConsistentReason.trim()) ||
+        "",
     dimensions: normalized,
     summary:
       (parsed && typeof parsed.summary === "string" && parsed.summary.trim()) ||

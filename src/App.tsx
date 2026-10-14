@@ -329,7 +329,7 @@ function SingleScorer() {
             </tbody>
           </table>
           <p className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs leading-relaxed text-slate-500">
-            总分 = 五维加权分 + 开源加分（共享开源代码仓且代码与参赛作品一致，+5）+ 定向揭榜赛题加分（参选前三个赛题，+10），满分 115。
+            总分 = 五维加权分 + 开源加分（共享开源代码仓且代码与参赛作品一致，+5；GitHub 代码仓不加分）+ 定向揭榜赛题加分（参选前三个赛题，+10），满分 115。
           </p>
         </div>
 
