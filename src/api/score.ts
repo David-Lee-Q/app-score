@@ -68,6 +68,7 @@ export interface RepoAccess {
 
 export interface NameResolution {
   name: string;
+  status: number;
   note: string;
 }
 

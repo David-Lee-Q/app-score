@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { requestScore } from "@/api/score";
+import { requestScore, resolveAppNames } from "@/api/score";
 import { SCORE_DIMENSIONS, DIMENSION_MAX_SCORE } from "@/config/dimensions";
 import { BUILT_IN_TOPICS } from "@/config/topics";
 import { TRACKS } from "@/config/tracks";
@@ -10,6 +10,7 @@ import BatchScorer from "@/components/BatchScorer";
 import HistoryPanel from "@/components/HistoryPanel";
 import Button from "@/components/Button";
 import { newHistoryId, saveHistory } from "@/utils/history";
+import { validateLink } from "@/utils/validate";
 
 type Mode = "single" | "batch" | "history";
 
@@ -119,9 +120,31 @@ function SingleScorer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [report, setReport] = useState<ScoreReport | null>(null);
+  const [appLinkWarn, setAppLinkWarn] = useState("");
+  const [autoName, setAutoName] = useState("");
 
   function update<K extends keyof typeof EMPTY_FORM>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "cosmocodeUrl") setAppLinkWarn("");
+  }
+
+  async function checkAppLink(value: string) {
+    const url = value.trim();
+    setAppLinkWarn("");
+    if (!url || validateLink("cosmocodeUrl", url).status !== "ok") return;
+    try {
+      const res = await resolveAppNames([url]);
+      const info = res[url];
+      if (info && info.status >= 500) {
+        setAppLinkWarn(`应用链接返回 HTTP ${info.status}，请确认应用是否正常运行`);
+      }
+      if (info?.name) {
+        setAutoName(info.name);
+        setForm((prev) => (prev.name.trim() ? prev : { ...prev, name: info.name }));
+      }
+    } catch {
+      // 忽略检测失败
+    }
   }
 
   const hasLink =
@@ -186,12 +209,17 @@ function SingleScorer() {
         <div>
           <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-slate-700">
             应用名称（选填）
+            {autoName && form.name === autoName && (
+              <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                根据应用链接自动匹配
+              </span>
+            )}
           </label>
           <input
             id="name"
             value={form.name}
             onChange={(e) => update("name", e.target.value)}
-            placeholder="用于区分应用，可留空"
+            placeholder="用于区分应用，可留空（将根据应用链接自动匹配）"
             className={inputClass}
           />
         </div>
@@ -243,8 +271,10 @@ function SingleScorer() {
             label="COSMO Code 应用链接"
             value={form.cosmocodeUrl}
             onChange={(v) => update("cosmocodeUrl", v)}
+            onBlur={() => void checkAppLink(form.cosmocodeUrl)}
             placeholder="https://..."
             className={inputClass}
+            warning={appLinkWarn}
           />
           <LinkField
             id="openlabUrl"
@@ -329,15 +359,19 @@ function LinkField({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   className,
+  warning,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder: string;
   className: string;
+  warning?: string;
 }) {
   return (
     <div>
@@ -349,9 +383,13 @@ function LinkField({
         type="url"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         className={className}
       />
+      {warning && (
+        <p className="mt-1.5 text-xs font-medium text-amber-600">⚠ {warning}</p>
+      )}
     </div>
   );
 }

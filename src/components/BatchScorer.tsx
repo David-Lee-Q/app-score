@@ -132,9 +132,12 @@ export default function BatchScorer() {
   const [repoAccess, setRepoAccess] = useState<Record<string, RepoAccess>>({});
   const [checkingRepos, setCheckingRepos] = useState(false);
   const [autoNamedUrls, setAutoNamedUrls] = useState<Set<string>>(new Set());
-  const attemptedNames = useRef<Set<string>>(new Set());
+  const attemptedLinks = useRef<Set<string>>(new Set());
   const [resolvingNames, setResolvingNames] = useState(false);
   const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
+  const [linkStatus, setLinkStatus] = useState<
+    Record<string, { status: number; note: string }>
+  >({});
   const dragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(
     null,
   );
@@ -223,27 +226,38 @@ export default function BatchScorer() {
     [repoUrlList, repoAccess],
   );
 
+  const serverErrorCount = useMemo(
+    () =>
+      rows.filter((r) => {
+        const status = linkStatus[r.cosmocodeUrl.trim()]?.status;
+        return status !== undefined && status >= 500;
+      }).length,
+    [rows, linkStatus],
+  );
+
   useEffect(() => {
     const pending = [
       ...new Set(
         rows
-          .filter(
-            (r) =>
-              !r.name.trim() &&
-              r.cosmocodeUrl.trim() &&
-              validateLink("cosmocodeUrl", r.cosmocodeUrl).status === "ok",
-          )
           .map((r) => r.cosmocodeUrl.trim())
-          .filter((u) => !attemptedNames.current.has(u)),
+          .filter((u) => u && validateLink("cosmocodeUrl", u).status === "ok")
+          .filter((u) => !attemptedLinks.current.has(u)),
       ),
     ];
     if (!pending.length) return;
-    pending.forEach((u) => attemptedNames.current.add(u));
+    pending.forEach((u) => attemptedLinks.current.add(u));
     let cancelled = false;
     setResolvingNames(true);
     resolveAppNames(pending)
       .then((results) => {
         if (cancelled) return;
+        setLinkStatus((prev) => {
+          const next = { ...prev };
+          for (const u of pending) {
+            next[u] = { status: results[u]?.status ?? 0, note: results[u]?.note ?? "" };
+          }
+          return next;
+        });
         setRows((prev) =>
           prev.map((r) => {
             if (r.name.trim()) return r;
@@ -515,6 +529,11 @@ export default function BatchScorer() {
                 <span className="text-indigo-500">正在根据 COSMO Code 应用链接读取并匹配应用名称…</span>
               </p>
             )}
+            {serverErrorCount > 0 && (
+              <p className="mb-1.5 text-xs text-amber-600">
+                有 {serverErrorCount} 个 COSMO Code 应用链接返回 HTTP 500（黄色标记），请确认应用是否正常运行
+              </p>
+            )}
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table
                 className="table-fixed text-left text-sm"
@@ -576,15 +595,26 @@ export default function BatchScorer() {
                             col.key === "repoUrl" && raw
                               ? repoAccess[raw.trim()]
                               : undefined;
+                          const linkInfo =
+                            col.key === "cosmocodeUrl" && raw
+                              ? linkStatus[raw.trim()]
+                              : undefined;
+                          const isWarn =
+                            !isError && !!linkInfo && linkInfo.status >= 500;
+                          const warnMsg = isWarn
+                            ? `应用链接返回 HTTP ${linkInfo!.status}，请确认应用是否正常运行`
+                            : undefined;
                           return (
                             <td
                               key={col.key}
                               title={
                                 isError
                                   ? errMsg
-                                  : repoInfo
-                                    ? `${raw}｜${repoInfo.note}`
-                                    : raw || undefined
+                                  : isWarn
+                                    ? warnMsg
+                                    : repoInfo
+                                      ? `${raw}｜${repoInfo.note}`
+                                      : raw || undefined
                               }
                               onClick={
                                 isLink
@@ -603,9 +633,11 @@ export default function BatchScorer() {
                               } ${
                                 isError
                                   ? "cursor-pointer font-medium text-rose-600 hover:bg-rose-50"
-                                  : isLink
-                                    ? "cursor-pointer text-slate-500 hover:bg-slate-50"
-                                    : "text-slate-500"
+                                  : isWarn
+                                    ? "cursor-pointer bg-amber-50 font-medium text-amber-700 hover:bg-amber-100"
+                                    : isLink
+                                      ? "cursor-pointer text-slate-500 hover:bg-slate-50"
+                                      : "text-slate-500"
                               }`}
                             >
                               {col.key === "repoUrl" ? (
@@ -632,6 +664,7 @@ export default function BatchScorer() {
                               ) : (
                                 <>
                                   {isError && <span className="mr-1">⚠</span>}
+                                  {isWarn && <span className="mr-1">⚠</span>}
                                   {col.key === "name" ? (
                                     <span className="flex items-center gap-1">
                                       <span className="truncate">{raw}</span>

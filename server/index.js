@@ -111,17 +111,20 @@ async function resolveAppName(url) {
       redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0 PreReviewBot/1.0" },
     });
-    if (!resp.ok) return { name: "", note: `HTTP ${resp.status}` };
+    const status = resp.status;
+    if (!resp.ok) {
+      return { name: "", status, note: `HTTP ${status}` };
+    }
     const html = (await resp.text()).slice(0, 300000);
     const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = match ? decodeEntities(match[1]).replace(/\s+/g, " ").trim() : "";
-    if (!title) return { name: "", note: "未找到页面标题" };
+    if (!title) return { name: "", status, note: "未找到页面标题" };
     if (PLATFORM_TITLE.test(title)) {
-      return { name: "", note: "页面为平台默认标题，无法匹配应用名称" };
+      return { name: "", status, note: "页面为平台默认标题，无法匹配应用名称" };
     }
-    return { name: title, note: "" };
+    return { name: title, status, note: "" };
   } catch (err) {
-    return { name: "", note: err.message };
+    return { name: "", status: 0, note: err.message };
   } finally {
     clearTimeout(timer);
   }
