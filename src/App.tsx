@@ -299,16 +299,18 @@ function SingleScorer() {
           </p>
         </div>
 
-        <Button type="submit" disabled={!canSubmit} className="w-full">
-          {loading ? (
-            <>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              正在评审中…
-            </>
-          ) : (
-            "开始打分"
-          )}
-        </Button>
+        <div className="flex justify-center">
+          <Button type="submit" disabled={!canSubmit}>
+            {loading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                正在评审中…
+              </>
+            ) : (
+              "开始打分"
+            )}
+          </Button>
+        </div>
       </form>
 
       {error && (

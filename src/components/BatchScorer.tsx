@@ -566,7 +566,7 @@ export default function BatchScorer() {
           </span>
         </label>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <Button
             type="button"
             onClick={runBatch}
@@ -581,16 +581,6 @@ export default function BatchScorer() {
                 : "批量评审中…"
               : `开始批量打分${rows.length ? `（${rows.length}）` : ""}`}
           </Button>
-          {hasResults && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => exportResultsCsv(items, SCORE_DIMENSIONS)}
-            >
-              导出结果 CSV
-            </Button>
-          )}
           {hasResults && items.some((i) => i.report?.calibrated) && (
             <span className="rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-600">
               已全局校准
@@ -632,9 +622,14 @@ export default function BatchScorer() {
                       </span>
                     </th>
                   ))}
+                  <th className="border-l border-indigo-100 bg-indigo-50 px-3 py-2.5 text-center font-medium text-indigo-600">
+                    五维分
+                  </th>
                   <th className="px-3 py-2.5 text-center font-medium">开源加分</th>
                   <th className="px-3 py-2.5 text-center font-medium">定向加分</th>
-                  <th className="px-3 py-2.5 text-center font-medium">综合总分</th>
+                  <th className="bg-indigo-600 px-3 py-2.5 text-center font-medium text-white">
+                    综合总分
+                  </th>
                   <th className="px-3 py-2.5 text-center font-medium">状态</th>
                   <th className="px-3 py-2.5 text-center font-medium">详情</th>
                 </tr>
@@ -667,6 +662,15 @@ export default function BatchScorer() {
                             </td>
                           );
                         })}
+                        <td className="border-l border-indigo-100 bg-indigo-50/60 px-3 py-2.5 text-center">
+                          {item.report ? (
+                            <span className="font-semibold text-slate-700">
+                              {Math.round(item.report.fiveDimScore)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-center">
                           {item.report ? (
                             <span className="font-semibold text-emerald-600">
@@ -685,26 +689,26 @@ export default function BatchScorer() {
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-center">
+                        <td className="bg-indigo-600 px-3 py-2.5 text-center">
                           {item.report ? (
                             <div>
                               <span
                                 className={`text-base font-bold ${
                                   item.report.disqualified
-                                    ? "text-rose-600"
-                                    : "text-indigo-600"
+                                    ? "text-rose-200"
+                                    : "text-white"
                                 }`}
                               >
                                 {Math.round(item.report.total)}
                               </span>
                               {item.report.disqualified && (
-                                <div className="text-[10px] leading-tight text-rose-500">
+                                <div className="text-[10px] leading-tight text-rose-100">
                                   应用链接无效
                                 </div>
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-300">—</span>
+                            <span className="text-indigo-200">—</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-center">{statusBadge(item.status)}</td>
@@ -723,7 +727,7 @@ export default function BatchScorer() {
                       </tr>
                       {isOpen && (
                         <tr className="bg-slate-50/60">
-                          <td colSpan={SCORE_DIMENSIONS.length + 7} className="px-4 py-3">
+                          <td colSpan={SCORE_DIMENSIONS.length + 8} className="px-4 py-3">
                             {item.error && (
                               <p className="text-sm text-rose-600">{item.error}</p>
                             )}
@@ -782,6 +786,19 @@ export default function BatchScorer() {
             </table>
           </div>
         </section>
+      )}
+
+      {hasResults && (
+        <div className="flex justify-center pt-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => exportResultsCsv(items, SCORE_DIMENSIONS)}
+          >
+            导出结果 CSV
+          </Button>
+        </div>
       )}
 
       {edit &&

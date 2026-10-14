@@ -31,9 +31,14 @@ function BatchTable({ entry }: { entry: HistoryEntry }) {
                 </span>
               </th>
             ))}
+            <th className="border-l border-indigo-100 bg-indigo-50 px-3 py-2 text-center font-medium text-indigo-600">
+              五维分
+            </th>
             <th className="px-3 py-2 text-center font-medium">开源加分</th>
             <th className="px-3 py-2 text-center font-medium">定向加分</th>
-            <th className="px-3 py-2 text-center font-medium">综合总分</th>
+            <th className="bg-indigo-600 px-3 py-2 text-center font-medium text-white">
+              综合总分
+            </th>
             <th className="px-3 py-2 text-center font-medium">状态</th>
           </tr>
         </thead>
@@ -58,13 +63,16 @@ function BatchTable({ entry }: { entry: HistoryEntry }) {
                     )}
                   </td>
                 ))}
+                <td className="border-l border-indigo-100 bg-indigo-50/60 px-3 py-2 text-center font-semibold text-slate-700">
+                  {item.report ? Math.round(item.report.fiveDimScore) : "—"}
+                </td>
                 <td className="px-3 py-2 text-center font-semibold text-emerald-600">
                   {item.report ? `+${item.report.openSourceBonus}` : "—"}
                 </td>
                 <td className="px-3 py-2 text-center font-semibold text-violet-600">
                   {item.report ? `+${item.report.directedTopicBonus}` : "—"}
                 </td>
-                <td className="px-3 py-2 text-center font-bold text-indigo-600">
+                <td className="bg-indigo-600 px-3 py-2 text-center font-bold text-white">
                   {item.report ? Math.round(item.report.total) : "—"}
                 </td>
                 <td className="px-3 py-2 text-center text-xs">
