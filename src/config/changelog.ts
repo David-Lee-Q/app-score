@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.10.5";
+export const APP_VERSION = "v0.11.0";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,17 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.0",
+    date: "2026-10-17",
+    changes: [
+      "评分记录新增「补对话」：上传含「COSMO Code应用链接／对话轮次／活跃天数」的文件，按应用链接逐行精准匹配，支持多次上传累积数据",
+      "批量记录表格新增「对话轮次」「活跃天数」两列，展示补对话数据以备确认；补对话数据仅对上传了文件的记录生效",
+      "新增「补深度分」：对两列数据全批 min-max 归一化（max=100、min=0，max==min 统一 100），按权重各 0.5 计算每行「COSMO Code使用深度」并持久化",
+      "「补深度分」仅在补对话后出现，自动生成的使用深度分仍可人工修改并标红",
+      "新增「补对话模板」下载",
+    ],
+  },
   {
     version: "v0.10.5",
     date: "2026-10-16",

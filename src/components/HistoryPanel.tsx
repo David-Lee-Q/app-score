@@ -13,6 +13,13 @@ import {
 } from "@/utils/spreadsheet";
 import { deleteHistory, fetchHistory, patchHistoryDecision, patchHistoryEntry, patchHistoryItem } from "@/utils/history";
 import { weightedFiveDim } from "@/utils/score";
+import {
+  computeUsageScores,
+  downloadUsageTemplate,
+  normalizeMatchKey,
+  parseUsageFile,
+  type UsageRow,
+} from "@/utils/usage";
 import { sortBy, toggleSort, type SortState, type SortValue } from "@/utils/sort";
 import { REVIEW_DECISIONS } from "@/config/decisions";
 import { generateRankingPoster } from "@/utils/poster";
@@ -247,7 +254,7 @@ function BatchTable({
     setSort((prev) => toggleSort(prev, key));
   }
 
-  const colCount = dimensions.length + (showTrackTopic ? 14 : 12);
+  const colCount = dimensions.length + (showTrackTopic ? 16 : 14);
 
   const pinCols: { key: string; width: number }[] = [{ key: "name", width: 200 }];
   if (showTrackTopic) pinCols.push({ key: "track", width: 76 }, { key: "topic", width: 200 });
@@ -460,6 +467,18 @@ function BatchTable({
               >
                 代码仓
               </th>
+              <th
+                className="px-3 py-2 font-medium"
+                title="补对话数据：对话轮次"
+              >
+                对话轮次
+              </th>
+              <th
+                className="px-3 py-2 font-medium"
+                title="补对话数据：活跃天数"
+              >
+                活跃天数
+              </th>
               {dimensions.map((d) => (
                 <SortableHeader
                   key={d.key}
@@ -584,6 +603,20 @@ function BatchTable({
                     </td>
                     <td className="px-2 py-2" style={pinStyle(linkBase + 2)}>
                       <LinkCell url={item.repoUrl} />
+                    </td>
+                    <td className="px-3 py-2 text-center text-xs text-slate-600">
+                      {item.usageRounds === undefined ? (
+                        <span className="text-slate-300">—</span>
+                      ) : (
+                        item.usageRounds
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-center text-xs text-slate-600">
+                      {item.usageActiveDays === undefined ? (
+                        <span className="text-slate-300">—</span>
+                      ) : (
+                        item.usageActiveDays
+                      )}
                     </td>
                     {dimensions.map((d) => {
                       const cell = dimByKey.get(d.key);
@@ -768,6 +801,10 @@ export default function HistoryPanel() {
   const [deleteTarget, setDeleteTarget] = useState<HistoryEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [refreshingNameId, setRefreshingNameId] = useState<string | null>(null);
+  const [usageMessage, setUsageMessage] = useState("");
+  const [usageProcessing, setUsageProcessing] = useState(false);
+  const usageTargetRef = useRef<HistoryEntry | null>(null);
+  const usageInputRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(0);
 
   async function persist(task: () => Promise<void>) {
@@ -1095,6 +1132,255 @@ export default function HistoryPanel() {
     }
   }
 
+  function openUsagePicker(entry: HistoryEntry) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    setUsageMessage("");
+    setError("");
+    usageTargetRef.current = entry;
+    usageInputRef.current?.click();
+  }
+
+  function onUsageInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const target = usageTargetRef.current;
+    e.target.value = "";
+    usageTargetRef.current = null;
+    if (file && target) void handleUsageUpload(target, file);
+  }
+
+  async function handleUsageUpload(entry: HistoryEntry, file: File) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    setUsageMessage("");
+    setError("");
+    setUsageProcessing(true);
+    try {
+      const rows = await parseUsageFile(file);
+      const byKey = new Map<string, UsageRow>();
+      for (const row of rows) if (row.key) byKey.set(row.key, row);
+
+      const items = entry.batch.items;
+      const matchedKeys = new Set<string>();
+      const matched: { item: BatchItemResult; rounds: number; activeDays: number }[] =
+        [];
+      const missingValue: string[] = [];
+
+      items.forEach((item) => {
+        const key = normalizeMatchKey(item.cosmocodeUrl || "");
+        if (!key) return;
+        const row = byKey.get(key);
+        if (!row) return;
+        matchedKeys.add(key);
+        if (row.rounds === null || row.activeDays === null) {
+          missingValue.push(row.rawKey);
+          return;
+        }
+        matched.push({ item, rounds: row.rounds, activeDays: row.activeDays });
+      });
+
+      const uploadedExtra = rows
+        .filter((row) => row.key && !matchedKeys.has(row.key))
+        .map((row) => row.rawKey);
+
+      if (matched.length === 0) {
+        setUsageMessage(
+          "补对话文件未匹配到本记录中的应用，请确认「COSMO Code应用链接」是否与记录一致。",
+        );
+        return;
+      }
+
+      const updatedItems = items.map((item) => {
+        const m = matched.find((x) => x.item === item);
+        const rounds = m ? m.rounds : item.usageRounds;
+        const activeDays = m ? m.activeDays : item.usageActiveDays;
+        const hasData = rounds !== undefined && activeDays !== undefined;
+        const needsReset =
+          hasData &&
+          item.report?.dimensions.some(
+            (d) => d.key === "cosmoUsage" && d.score !== null,
+          );
+        if (!m && !needsReset) return item;
+        if (!item.report) {
+          return { ...item, usageRounds: rounds, usageActiveDays: activeDays };
+        }
+        const dimensions = item.report.dimensions.map((d) =>
+          d.key === "cosmoUsage"
+            ? {
+                ...d,
+                score: null,
+                edited: false,
+                originalScore: undefined,
+                reason: "已上传补对话数据，待点击「补深度分」计算。",
+              }
+            : d,
+        );
+        const fiveDimScore = weightedFiveDim(dimensions);
+        const report: ScoreReport = {
+          ...item.report,
+          dimensions,
+          fiveDimScore,
+          total:
+            fiveDimScore +
+            item.report.openSourceBonus +
+            item.report.directedTopicBonus,
+        };
+        return { ...item, report, usageRounds: rounds, usageActiveDays: activeDays };
+      });
+
+      const matchedCount = updatedItems.filter(
+        (it) => it.usageRounds !== undefined && it.usageActiveDays !== undefined,
+      ).length;
+
+      const supplement = {
+        fileName: file.name,
+        uploadedAt: new Date().toISOString(),
+        matchedCount,
+        totalCount: items.length,
+      };
+
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id && e.batch
+            ? { ...e, batch: { ...e.batch, items: updatedItems, supplement } }
+            : e,
+        ),
+      );
+
+      const notes: string[] = [
+        `已补对话数据：匹配 ${matched.length} 条（累计 ${matchedCount}/${items.length}），请点击「补深度分」计算使用深度。`,
+      ];
+      if (missingValue.length) notes.push(`${missingValue.length} 条缺少数值已跳过。`);
+      if (uploadedExtra.length) {
+        notes.push(`文件中有 ${uploadedExtra.length} 条未匹配到本记录。`);
+      }
+      setUsageMessage(notes.join(""));
+
+      await persist(async () => {
+        for (let i = 0; i < items.length; i += 1) {
+          const original = items[i];
+          const updated = updatedItems[i];
+          if (updated === original || !original.id) continue;
+          await patchHistoryItem(entry.id, original.id, {
+            usageRounds: updated.usageRounds,
+            usageActiveDays: updated.usageActiveDays,
+            ...(updated.report ? { report: updated.report } : {}),
+          });
+        }
+        await patchHistoryEntry(entry.id, { batch: { supplement } });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "补对话失败");
+      setUsageMessage("");
+      void load();
+    } finally {
+      setUsageProcessing(false);
+    }
+  }
+
+  async function computeUsageDepths(entry: HistoryEntry) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    const items = entry.batch.items;
+    const targets: {
+      index: number;
+      item: BatchItemResult;
+      rounds: number;
+      activeDays: number;
+    }[] = [];
+    items.forEach((item, index) => {
+      if (!item.report) return;
+      if (item.usageRounds === undefined || item.usageActiveDays === undefined)
+        return;
+      targets.push({
+        index,
+        item,
+        rounds: item.usageRounds,
+        activeDays: item.usageActiveDays,
+      });
+    });
+
+    if (targets.length === 0) {
+      setUsageMessage("本记录暂无补对话数据，请先点击「补对话」上传文件。");
+      return;
+    }
+
+    setUsageMessage("");
+    setError("");
+    setUsageProcessing(true);
+    try {
+      const scores = computeUsageScores(
+        targets.map((t) => ({
+          key: String(t.index),
+          rounds: t.rounds,
+          activeDays: t.activeDays,
+        })),
+      );
+
+      const updatedItems = items.map((item, index) => {
+        const t = targets.find((x) => x.index === index);
+        if (!t || !item.report) return item;
+        const score = scores.get(String(index));
+        if (score === undefined) return item;
+        const dimensions = item.report.dimensions.map((d) =>
+          d.key === "cosmoUsage"
+            ? {
+                ...d,
+                score,
+                edited: false,
+                originalScore: undefined,
+                reason: `补对话数据自动赋分：对话轮次 ${t.rounds}、活跃天数 ${t.activeDays}（全批归一化，权重各 0.5）。`,
+              }
+            : d,
+        );
+        const fiveDimScore = weightedFiveDim(dimensions);
+        const report: ScoreReport = {
+          ...item.report,
+          dimensions,
+          fiveDimScore,
+          total:
+            fiveDimScore +
+            item.report.openSourceBonus +
+            item.report.directedTopicBonus,
+        };
+        return { ...item, report };
+      });
+
+      const prevSupplement = entry.batch.supplement;
+      const supplement = {
+        fileName: prevSupplement?.fileName ?? "补对话数据",
+        uploadedAt: prevSupplement?.uploadedAt ?? new Date().toISOString(),
+        matchedCount: prevSupplement?.matchedCount ?? targets.length,
+        totalCount: prevSupplement?.totalCount ?? items.length,
+        scoredAt: new Date().toISOString(),
+      };
+
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id && e.batch
+            ? { ...e, batch: { ...e.batch, items: updatedItems, supplement } }
+            : e,
+        ),
+      );
+      setUsageMessage(
+        `已按全批归一化计算 COSMO Code 使用深度：匹配 ${targets.length}/${items.length} 个应用。`,
+      );
+
+      await persist(async () => {
+        for (const t of targets) {
+          if (!t.item.id) continue;
+          const updated = updatedItems[t.index];
+          if (!updated?.report) continue;
+          await patchHistoryItem(entry.id, t.item.id, { report: updated.report });
+        }
+        await patchHistoryEntry(entry.id, { batch: { supplement } });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "计算使用深度失败");
+      setUsageMessage("");
+      void load();
+    } finally {
+      setUsageProcessing(false);
+    }
+  }
+
   async function handleToggleSort(entry: HistoryEntry) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const nextSortByTopic = !entry.batch.sortByTopic;
@@ -1160,19 +1446,44 @@ export default function HistoryPanel() {
             保存每次单个与批量评分结果，支持查看与下载，最多保留最近 100 条
           </p>
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => void load()}
-        >
-          刷新
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="soft"
+            size="sm"
+            onClick={downloadUsageTemplate}
+          >
+            <Icon name="download" className="h-3.5 w-3.5" />
+            补对话模板
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => void load()}
+          >
+            刷新
+          </Button>
+        </div>
       </div>
+
+      <input
+        ref={usageInputRef}
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={onUsageInputChange}
+      />
 
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-600">
           {error}
+        </div>
+      )}
+
+      {usageMessage && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm text-indigo-700">
+          {usageMessage}
         </div>
       )}
 
@@ -1209,6 +1520,11 @@ export default function HistoryPanel() {
                       {entry.subtitle ? `${entry.subtitle} · ` : ""}
                       {formatTime(entry.createdAt)}
                       {entry.calibrated ? " · 已全局校准" : ""}
+                      {entry.batch?.supplement
+                        ? entry.batch.supplement.scoredAt
+                          ? ` · 已补对话（${entry.batch.supplement.matchedCount}/${entry.batch.supplement.totalCount}）· 深度分已生成`
+                          : ` · 已补对话（${entry.batch.supplement.matchedCount}/${entry.batch.supplement.totalCount}）· 待补深度分`
+                        : ""}
                     </div>
                   </div>
                   {typeof entry.total === "number" && (
@@ -1272,6 +1588,33 @@ export default function HistoryPanel() {
                         >
                           <Icon name="download" className="h-3.5 w-3.5" />
                           排行榜
+                        </Button>
+                      )}
+                    {entry.kind === "batch" &&
+                      (entry.batch?.items?.length ?? 0) > 0 && (
+                        <Button
+                          type="button"
+                          variant="soft"
+                          size="xs"
+                          disabled={usageProcessing}
+                          onClick={() => openUsagePicker(entry)}
+                        >
+                          <Icon name="upload" className="h-3.5 w-3.5" />
+                          {usageProcessing ? "处理中…" : "补对话"}
+                        </Button>
+                      )}
+                    {entry.kind === "batch" &&
+                      !!entry.batch?.supplement &&
+                      (entry.batch?.items?.length ?? 0) > 0 && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="xs"
+                          disabled={usageProcessing}
+                          onClick={() => void computeUsageDepths(entry)}
+                        >
+                          <Icon name="scale" className="h-3.5 w-3.5" />
+                          补深度分
                         </Button>
                       )}
                     <Button
