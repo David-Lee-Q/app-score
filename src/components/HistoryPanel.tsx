@@ -11,7 +11,7 @@ import {
   exportSingleResultCsv,
   exportTrackedXlsx,
 } from "@/utils/spreadsheet";
-import { deleteHistory, fetchHistory, patchHistoryDecision, patchHistoryEntry, patchHistoryItem, newHistoryId } from "@/utils/history";
+import { deleteHistory, fetchHistory, patchHistoryDecision, patchHistoryEntry, patchHistoryItem } from "@/utils/history";
 import { weightedFiveDim } from "@/utils/score";
 import { sortBy, toggleSort, type SortState, type SortValue } from "@/utils/sort";
 import { REVIEW_DECISIONS } from "@/config/decisions";
@@ -71,18 +71,6 @@ function LinkCell({ url }: { url: string }) {
       打开
     </a>
   );
-}
-
-function sortItemsByTopic(items: BatchItemResult[]): BatchItemResult[] {
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => {
-      const ta = (a.item.topic || "").trim() || "\uffff";
-      const tb = (b.item.topic || "").trim() || "\uffff";
-      if (ta === tb) return a.index - b.index;
-      return ta.localeCompare(tb, "zh");
-    })
-    .map((x) => x.item);
 }
 
 function EditableScoreCell({
@@ -1109,54 +1097,20 @@ export default function HistoryPanel() {
 
   async function handleToggleSort(entry: HistoryEntry) {
     if (entry.kind !== "batch" || !entry.batch) return;
-    const base = entry.batch;
-    const baseItems = base.items ?? [];
-    const withIds = baseItems.map((it) =>
-      it.id ? it : { ...it, id: newHistoryId() },
-    );
-    const sortByTopic = !base.sortByTopic;
-    let items = withIds;
-    let originalOrder = base.originalOrder;
-    if (sortByTopic) {
-      if (!originalOrder) {
-        originalOrder = withIds
-          .map((it) => it.id)
-          .filter((id): id is string => Boolean(id));
-      }
-      items = sortItemsByTopic(withIds);
-    } else if (originalOrder) {
-      const byId = new Map(withIds.map((it) => [it.id as string, it]));
-      const restored: BatchItemResult[] = [];
-      for (const id of originalOrder) {
-        const it = byId.get(id);
-        if (it) restored.push(it);
-      }
-      const seen = new Set(restored.map((it) => it.id));
-      for (const it of withIds) if (!seen.has(it.id)) restored.push(it);
-      items = restored;
-    }
-    const nextBatch = {
-      ...base,
-      items,
-      sortByTopic,
-      originalOrder,
-      originalOrderAt:
-        base.originalOrderAt ??
-        (originalOrder ? new Date().toISOString() : undefined),
-    };
+    const nextSortByTopic = !entry.batch.sortByTopic;
     setEntries((prev) =>
-      prev.map((e) => (e.id === entry.id ? { ...e, batch: nextBatch } : e)),
+      prev.map((e) =>
+        e.id === entry.id && e.batch
+          ? { ...e, batch: { ...e.batch, sortByTopic: nextSortByTopic } }
+          : e,
+      ),
     );
     try {
-      await patchHistoryEntry(entry.id, {
-        batch: {
-          sortByTopic,
-          originalOrder,
-          originalOrderAt: nextBatch.originalOrderAt,
-        },
-      });
+      await persist(() =>
+        patchHistoryEntry(entry.id, { batch: { sortByTopic: nextSortByTopic } }),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "更新排序失败");
+      setError(err instanceof Error ? err.message : "切换分组失败");
       void load();
     }
   }

@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.10.4";
+export const APP_VERSION = "v0.10.5";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.10.5",
+    date: "2026-10-16",
+    changes: [
+      "修复历史记录点击「恢复原始顺序」可能影响人工改动的问题：该按钮现在只切换赛题分组显示，不再重排或改写应用条目",
+      "任何人工修改（分值、开源/定向加分、人工评价、应用名称、评审状态）在切换分组前后均完整保留并持续同步到云端",
+      "服务端历史写入改为串行加锁，多人同时保存时避免并发覆盖",
+    ],
+  },
   {
     version: "v0.10.4",
     date: "2026-10-16",

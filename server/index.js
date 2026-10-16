@@ -66,19 +66,32 @@ async function writeHistory(list) {
   await fs.writeFile(HISTORY_FILE, JSON.stringify(list, null, 2), "utf8");
 }
 
+let historyWriteChain = Promise.resolve();
+function withHistoryLock(task) {
+  const result = historyWriteChain.then(task, task);
+  historyWriteChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 app.get("/api/history", async (_req, res) => {
-  const items = await readHistory();
-  let changed = false;
-  for (const entry of items) {
-    if (!entry?.batch?.items) continue;
-    for (const item of entry.batch.items) {
-      if (item && !item.id) {
-        item.id = randomUUID();
-        changed = true;
+  const items = await withHistoryLock(async () => {
+    const list = await readHistory();
+    let changed = false;
+    for (const entry of list) {
+      if (!entry?.batch?.items) continue;
+      for (const item of entry.batch.items) {
+        if (item && !item.id) {
+          item.id = randomUUID();
+          changed = true;
+        }
       }
     }
-  }
-  if (changed) await writeHistory(items);
+    if (changed) await writeHistory(list);
+    return list;
+  });
   res.json({ items });
 });
 
@@ -87,15 +100,19 @@ app.post("/api/history", async (req, res) => {
   if (!entry || typeof entry !== "object" || !entry.id) {
     return res.status(400).json({ error: "无效的历史记录" });
   }
-  const list = await readHistory();
-  const next = [entry, ...list.filter((e) => e && e.id !== entry.id)].slice(0, 100);
-  await writeHistory(next);
+  await withHistoryLock(async () => {
+    const list = await readHistory();
+    const next = [entry, ...list.filter((e) => e && e.id !== entry.id)].slice(0, 100);
+    await writeHistory(next);
+  });
   res.json({ ok: true, id: entry.id });
 });
 
 app.delete("/api/history/:id", async (req, res) => {
-  const list = await readHistory();
-  await writeHistory(list.filter((e) => e && e.id !== req.params.id));
+  await withHistoryLock(async () => {
+    const list = await readHistory();
+    await writeHistory(list.filter((e) => e && e.id !== req.params.id));
+  });
   res.json({ ok: true });
 });
 
@@ -103,66 +120,78 @@ const REVIEW_DECISIONS = new Set(["advance", "hold", "out"]);
 
 app.patch("/api/history/:id/decision", async (req, res) => {
   const { itemId, decision } = req.body || {};
-  const list = await readHistory();
-  const entry = list.find((e) => e && e.id === req.params.id);
-  if (!entry) return res.status(404).json({ error: "未找到该记录" });
-  if (!entry.batch || !Array.isArray(entry.batch.items)) {
-    return res.status(400).json({ error: "该记录不是批量评分" });
-  }
-  const item = entry.batch.items.find((it) => it && it.id === itemId);
-  if (!item) return res.status(400).json({ error: "未找到该应用" });
-  if (REVIEW_DECISIONS.has(decision)) item.decision = decision;
-  else delete item.decision;
-  await writeHistory(list);
-  res.json({ ok: true, decision: item.decision ?? null });
+  const result = await withHistoryLock(async () => {
+    const list = await readHistory();
+    const entry = list.find((e) => e && e.id === req.params.id);
+    if (!entry) return { status: 404, error: "未找到该记录" };
+    if (!entry.batch || !Array.isArray(entry.batch.items)) {
+      return { status: 400, error: "该记录不是批量评分" };
+    }
+    const item = entry.batch.items.find((it) => it && it.id === itemId);
+    if (!item) return { status: 400, error: "未找到该应用" };
+    if (REVIEW_DECISIONS.has(decision)) item.decision = decision;
+    else delete item.decision;
+    await writeHistory(list);
+    return { decision: item.decision ?? null };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, decision: result.decision });
 });
 
 app.patch("/api/history/:id/items/:itemId", async (req, res) => {
-  const list = await readHistory();
-  const entry = list.find((e) => e && e.id === req.params.id);
-  if (!entry) return res.status(404).json({ error: "未找到该记录" });
-  if (!entry.batch || !Array.isArray(entry.batch.items)) {
-    return res.status(400).json({ error: "该记录不是批量评分" });
-  }
-  const index = entry.batch.items.findIndex(
-    (it) => it && it.id === req.params.itemId,
-  );
-  if (index === -1) return res.status(400).json({ error: "未找到该应用" });
-  const patch = req.body && typeof req.body === "object" ? req.body : {};
-  const current = entry.batch.items[index];
-  const merged = { ...current, ...patch, id: current.id };
-  if (patch.report && typeof patch.report === "object") {
-    merged.report = { ...current.report, ...patch.report };
-  }
-  entry.batch.items[index] = merged;
-  await writeHistory(list);
-  res.json({ ok: true, item: merged });
+  const result = await withHistoryLock(async () => {
+    const list = await readHistory();
+    const entry = list.find((e) => e && e.id === req.params.id);
+    if (!entry) return { status: 404, error: "未找到该记录" };
+    if (!entry.batch || !Array.isArray(entry.batch.items)) {
+      return { status: 400, error: "该记录不是批量评分" };
+    }
+    const index = entry.batch.items.findIndex(
+      (it) => it && it.id === req.params.itemId,
+    );
+    if (index === -1) return { status: 400, error: "未找到该应用" };
+    const patch = req.body && typeof req.body === "object" ? req.body : {};
+    const current = entry.batch.items[index];
+    const merged = { ...current, ...patch, id: current.id };
+    if (patch.report && typeof patch.report === "object") {
+      merged.report = { ...current.report, ...patch.report };
+    }
+    entry.batch.items[index] = merged;
+    await writeHistory(list);
+    return { item: merged };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, item: result.item });
 });
 
 app.patch("/api/history/:id", async (req, res) => {
-  const list = await readHistory();
-  const index = list.findIndex((e) => e && e.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: "未找到该记录" });
-  const patch = req.body && typeof req.body === "object" ? req.body : {};
-  const current = list[index];
-  const merged = { ...current, ...patch, id: current.id };
-  if (
-    patch.batch &&
-    typeof patch.batch === "object" &&
-    current.batch &&
-    typeof current.batch === "object"
-  ) {
-    merged.batch = { ...current.batch, ...patch.batch };
+  const result = await withHistoryLock(async () => {
+    const list = await readHistory();
+    const index = list.findIndex((e) => e && e.id === req.params.id);
+    if (index === -1) return { status: 404, error: "未找到该记录" };
+    const patch = req.body && typeof req.body === "object" ? req.body : {};
+    const current = list[index];
+    const merged = { ...current, ...patch, id: current.id };
     if (
-      Array.isArray(current.batch.items) &&
-      !Array.isArray(merged.batch.items)
+      patch.batch &&
+      typeof patch.batch === "object" &&
+      current.batch &&
+      typeof current.batch === "object"
     ) {
-      merged.batch.items = current.batch.items;
+      merged.batch = { ...current.batch, ...patch.batch };
+      if (
+        Array.isArray(current.batch.items) &&
+        !Array.isArray(merged.batch.items)
+      ) {
+        merged.batch.items = current.batch.items;
+      }
     }
-  }
-  list[index] = merged;
-  await writeHistory(list);
-  res.json({ ok: true, item: list[index] });
+    list[index] = merged;
+    await writeHistory(list);
+    return { item: list[index] };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, item: result.item });
 });
 
 app.post("/api/check-repos", async (req, res) => {  const urls = Array.isArray(req.body?.urls)
