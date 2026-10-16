@@ -79,6 +79,8 @@ export interface BatchItemResult extends ApplicationRow {
   error?: string;
   decision?: ReviewDecision;
   comment?: string;
+  usageRounds?: number;
+  usageActiveDays?: number;
 }
 
 export interface ScoreMeta {
@@ -88,6 +90,14 @@ export interface ScoreMeta {
   cosmocodeUrl: string;
   openlabUrl: string;
   repoUrl: string;
+}
+
+export interface BatchSupplement {
+  fileName: string;
+  uploadedAt: string;
+  matchedCount: number;
+  totalCount: number;
+  scoredAt?: string;
 }
 
 export interface HistoryEntry {
@@ -106,5 +116,6 @@ export interface HistoryEntry {
     sortByTopic?: boolean;
     originalOrder?: string[];
     originalOrderAt?: string;
+    supplement?: BatchSupplement;
   };
 }
