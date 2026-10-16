@@ -178,6 +178,7 @@ function buildResultRows(
     "开源加分依据",
     "定向加分依据",
     "综合评价",
+    "人工评价",
     "状态",
     "备注",
   ];
@@ -223,6 +224,7 @@ function buildResultRows(
       openSourceReason,
       directedReason,
       overall,
+      item.comment ?? "",
       statusLabel(item.status),
       item.error ?? "",
     ];

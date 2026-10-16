@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.0";
+export const APP_VERSION = "v0.11.1";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.1",
+    date: "2026-10-17",
+    changes: [
+      "历史记录中人工新增的评价（人工评价）现已写入下载结果：CSV 与分组排序 Excel 均新增「人工评价」列，位于「综合评价」之后",
+      "历史批量表的「对话轮次」「活跃天数」两列表头支持点击排序（带方向指示），方便按使用深度核验",
+      "修复「补对话」「补深度分」按钮加载状态串记录的问题：处理状态改为按记录隔离，仅当前记录显示处理中并禁用，其余记录不受影响",
+    ],
+  },
   {
     version: "v0.11.0",
     date: "2026-10-17",

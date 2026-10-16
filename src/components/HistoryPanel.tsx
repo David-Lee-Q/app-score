@@ -199,6 +199,8 @@ function EditableScoreCell({
 
 function batchResultSortValue(item: BatchItemResult, key: string): SortValue {
   if (key === "name") return item.name || "";
+  if (key === "usageRounds") return item.usageRounds ?? null;
+  if (key === "usageActiveDays") return item.usageActiveDays ?? null;
   const report = item.report;
   if (!report) return null;
   switch (key) {
@@ -467,18 +469,22 @@ function BatchTable({
               >
                 代码仓
               </th>
-              <th
-                className="px-3 py-2 font-medium"
+              <SortableHeader
+                label="对话轮次"
+                sortKey="usageRounds"
+                sort={sort}
+                onSort={handleSort}
                 title="补对话数据：对话轮次"
-              >
-                对话轮次
-              </th>
-              <th
                 className="px-3 py-2 font-medium"
+              />
+              <SortableHeader
+                label="活跃天数"
+                sortKey="usageActiveDays"
+                sort={sort}
+                onSort={handleSort}
                 title="补对话数据：活跃天数"
-              >
-                活跃天数
-              </th>
+                className="px-3 py-2 font-medium"
+              />
               {dimensions.map((d) => (
                 <SortableHeader
                   key={d.key}
@@ -802,7 +808,25 @@ export default function HistoryPanel() {
   const [deleting, setDeleting] = useState(false);
   const [refreshingNameId, setRefreshingNameId] = useState<string | null>(null);
   const [usageMessage, setUsageMessage] = useState("");
-  const [usageProcessing, setUsageProcessing] = useState(false);
+  const [usageProcessingIds, setUsageProcessingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  function beginUsageProcessing(id: string) {
+    setUsageProcessingIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }
+
+  function endUsageProcessing(id: string) {
+    setUsageProcessingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
   const usageTargetRef = useRef<HistoryEntry | null>(null);
   const usageInputRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(0);
@@ -1152,7 +1176,7 @@ export default function HistoryPanel() {
     if (entry.kind !== "batch" || !entry.batch) return;
     setUsageMessage("");
     setError("");
-    setUsageProcessing(true);
+    beginUsageProcessing(entry.id);
     try {
       const rows = await parseUsageFile(file);
       const byKey = new Map<string, UsageRow>();
@@ -1272,7 +1296,7 @@ export default function HistoryPanel() {
       setUsageMessage("");
       void load();
     } finally {
-      setUsageProcessing(false);
+      endUsageProcessing(entry.id);
     }
   }
 
@@ -1304,7 +1328,7 @@ export default function HistoryPanel() {
 
     setUsageMessage("");
     setError("");
-    setUsageProcessing(true);
+    beginUsageProcessing(entry.id);
     try {
       const scores = computeUsageScores(
         targets.map((t) => ({
@@ -1377,7 +1401,7 @@ export default function HistoryPanel() {
       setUsageMessage("");
       void load();
     } finally {
-      setUsageProcessing(false);
+      endUsageProcessing(entry.id);
     }
   }
 
@@ -1596,11 +1620,11 @@ export default function HistoryPanel() {
                           type="button"
                           variant="soft"
                           size="xs"
-                          disabled={usageProcessing}
+                          disabled={usageProcessingIds.has(entry.id)}
                           onClick={() => openUsagePicker(entry)}
                         >
                           <Icon name="upload" className="h-3.5 w-3.5" />
-                          {usageProcessing ? "处理中…" : "补对话"}
+                          {usageProcessingIds.has(entry.id) ? "处理中…" : "补对话"}
                         </Button>
                       )}
                     {entry.kind === "batch" &&
@@ -1610,11 +1634,11 @@ export default function HistoryPanel() {
                           type="button"
                           variant="primary"
                           size="xs"
-                          disabled={usageProcessing}
+                          disabled={usageProcessingIds.has(entry.id)}
                           onClick={() => void computeUsageDepths(entry)}
                         >
                           <Icon name="scale" className="h-3.5 w-3.5" />
-                          补深度分
+                          {usageProcessingIds.has(entry.id) ? "处理中…" : "补深度分"}
                         </Button>
                       )}
                     <Button
