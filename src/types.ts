@@ -9,8 +9,10 @@ export interface DimensionScore {
   key: string;
   name: string;
   weight: number;
-  score: number;
+  score: number | null;
   reason: string;
+  edited?: boolean;
+  originalScore?: number | null;
 }
 
 export interface SourceInfo {
@@ -22,11 +24,22 @@ export interface SourceInfo {
   note: string;
 }
 
+export interface DirectedTopicCheck {
+  required: boolean;
+  conforms: boolean;
+  reason: string;
+}
+
 export interface ScoreReport {
   total: number;
   fiveDimScore: number;
   openSourceBonus: number;
   directedTopicBonus: number;
+  openSourceOriginal?: number;
+  openSourceEdited?: boolean;
+  directedOriginal?: number;
+  directedEdited?: boolean;
+  directedTopicCheck?: DirectedTopicCheck;
   openSourceReason?: string;
   dimensions: DimensionScore[];
   summary: string;
@@ -57,10 +70,15 @@ export interface ApplicationRow extends ApplicationInput {
 
 export type BatchItemStatus = "pending" | "scoring" | "done" | "error";
 
+export type ReviewDecision = "advance" | "hold" | "out";
+
 export interface BatchItemResult extends ApplicationRow {
+  id?: string;
   status: BatchItemStatus;
   report?: ScoreReport;
   error?: string;
+  decision?: ReviewDecision;
+  comment?: string;
 }
 
 export interface ScoreMeta {
@@ -81,6 +99,12 @@ export interface HistoryEntry {
   total?: number;
   calibrated?: boolean;
   dimensions: ScoreDimension[];
-  single?: { meta: ScoreMeta; report: ScoreReport };
-  batch?: { items: BatchItemResult[]; fileName?: string };
+  single?: { meta: ScoreMeta; report?: ScoreReport; error?: string };
+  batch?: {
+    items: BatchItemResult[];
+    fileName?: string;
+    sortByTopic?: boolean;
+    originalOrder?: string[];
+    originalOrderAt?: string;
+  };
 }

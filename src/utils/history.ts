@@ -1,4 +1,4 @@
-import type { HistoryEntry } from "@/types";
+import type { HistoryEntry, ReviewDecision } from "@/types";
 
 export function newHistoryId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -28,4 +28,32 @@ export async function deleteHistory(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`删除历史失败（HTTP ${res.status}）`);
+}
+
+export async function patchHistoryDecision(
+  id: string,
+  itemId: string,
+  decision: ReviewDecision | null,
+): Promise<void> {
+  const res = await fetch(
+    `/api/history/${encodeURIComponent(id)}/decision`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, decision }),
+    },
+  );
+  if (!res.ok) throw new Error(`更新评审状态失败（HTTP ${res.status}）`);
+}
+
+export async function patchHistoryEntry(
+  id: string,
+  patch: Partial<HistoryEntry>,
+): Promise<void> {
+  const res = await fetch(`/api/history/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`更新历史记录失败（HTTP ${res.status}）`);
 }

@@ -1,6 +1,10 @@
 export interface WeightedItem {
   weight: number;
-  score: number;
+  score: number | null;
+}
+
+function val(score: number | null | undefined): number {
+  return Number.isFinite(Number(score)) ? Number(score) : 0;
 }
 
 export function weightedFiveDim(items: WeightedItem[]): number {
@@ -10,9 +14,9 @@ export function weightedFiveDim(items: WeightedItem[]): number {
     0,
   );
   if (totalWeight <= 0) {
-    return Math.round(items.reduce((sum, d) => sum + d.score, 0) / items.length);
+    return Math.round(items.reduce((sum, d) => sum + val(d.score), 0) / items.length);
   }
   return Math.round(
-    items.reduce((sum, d) => sum + d.score * (Number(d.weight) || 0), 0) / totalWeight,
+    items.reduce((sum, d) => sum + val(d.score) * (Number(d.weight) || 0), 0) / totalWeight,
   );
 }

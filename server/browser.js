@@ -41,11 +41,15 @@ export async function renderPage(url, { timeout = 25000 } = {}) {
     await new Promise((resolve) => setTimeout(resolve, 1200));
 
     const result = await page.evaluate(() => {
+      const clean = (v) => (v || "").replace(/\s+/g, " ").trim();
       const meta =
         document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
       const title = document.title || "";
+      const ogTitle =
+        document.querySelector('meta[property="og:title"]')?.getAttribute("content") || "";
+      const h1 = clean(document.querySelector("h1")?.innerText || "");
       const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-      return { title, meta, text };
+      return { title, meta, ogTitle, h1, text };
     });
 
     const text = [
@@ -60,6 +64,9 @@ export async function renderPage(url, { timeout = 25000 } = {}) {
     return {
       ok: !!text,
       text: text.slice(0, 8000),
+      title: result.title,
+      ogTitle: result.ogTitle,
+      h1: result.h1,
       note: text ? "" : "渲染后无可提取文本",
     };
   } catch (err) {

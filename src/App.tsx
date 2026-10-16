@@ -4,15 +4,22 @@ import { SCORE_DIMENSIONS, DIMENSION_MAX_SCORE } from "@/config/dimensions";
 import { BUILT_IN_TOPICS } from "@/config/topics";
 import { TRACKS } from "@/config/tracks";
 import { APP_VERSION, CHANGELOG } from "@/config/changelog";
-import type { ScoreReport } from "@/types";
+import type { ScoreMeta, ScoreReport } from "@/types";
 import ScoreResult from "@/components/ScoreResult";
 import BatchScorer from "@/components/BatchScorer";
 import HistoryPanel from "@/components/HistoryPanel";
 import Button from "@/components/Button";
+import { Icon, type IconName } from "@/components/icons";
 import { newHistoryId, saveHistory } from "@/utils/history";
 import { validateLink } from "@/utils/validate";
 
 type Mode = "single" | "batch" | "history";
+
+const MODES: { key: Mode; label: string }[] = [
+  { key: "single", label: "单个评分" },
+  { key: "batch", label: "批量评分" },
+  { key: "history", label: "评分历史" },
+];
 
 export default function App() {
   const [mode, setMode] = useState<Mode>("single");
@@ -20,41 +27,54 @@ export default function App() {
 
   return (
     <div className="flex min-h-full flex-col bg-gradient-to-b from-slate-50 to-slate-100">
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-5 py-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-bold text-white shadow">
-            预
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur">
+        <div className="grid w-full grid-cols-1 items-center gap-x-6 px-4 sm:grid-cols-[1fr_auto_1fr] sm:px-5 lg:px-6">
+          <div className="flex items-center gap-3 pt-3 justify-self-start sm:py-3 sm:pt-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-bold text-white shadow">
+              预
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-slate-800">智能应用预审打分系统</h1>
+              <p className="text-xs text-slate-500">
+                录入申报信息，自动输出 {SCORE_DIMENSIONS.length} 个维度评分
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-slate-800">智能应用预审打分系统</h1>
-            <p className="text-xs text-slate-500">
-              录入申报信息，自动输出 {SCORE_DIMENSIONS.length} 个维度评分
-            </p>
-          </div>
+
+          <nav
+            aria-label="主导航"
+            className="flex items-stretch justify-center gap-1 justify-self-center pb-1 sm:pb-0"
+          >
+            {MODES.map((tab) => {
+              const active = mode === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setMode(tab.key)}
+                  aria-current={active ? "page" : undefined}
+                  className={`relative flex items-center px-3 py-2.5 text-sm font-bold transition sm:px-5 sm:py-0 ${
+                    active
+                      ? "text-indigo-600"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {tab.label}
+                  <span
+                    className={`absolute inset-x-2 bottom-0 h-0.5 rounded-full transition ${
+                      active ? "bg-indigo-600" : "bg-transparent"
+                    }`}
+                  />
+                </button>
+              );
+            })}
+          </nav>
+
+          <div aria-hidden="true" className="hidden sm:block" />
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-5 py-8">
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          {(
-            [
-              { key: "single", label: "单个评分" },
-              { key: "batch", label: "批量评分" },
-              { key: "history", label: "评分历史" },
-            ] as { key: Mode; label: string }[]
-          ).map((tab) => (
-            <Button
-              key={tab.key}
-              type="button"
-              size="tab"
-              variant={mode === tab.key ? "primary" : "ghost"}
-              onClick={() => setMode(tab.key)}
-            >
-              {tab.label}
-            </Button>
-          ))}
-        </div>
-
+      <main className="w-full flex-1 space-y-6 px-4 py-6 sm:px-5 sm:py-8 lg:px-6">
         {mode === "single" ? (
           <SingleScorer />
         ) : mode === "batch" ? (
@@ -65,7 +85,7 @@ export default function App() {
       </main>
 
       <footer className="border-t border-slate-200 bg-white/60">
-        <div className="mx-auto max-w-7xl px-5 py-6 text-xs text-slate-400">
+        <div className="w-full px-4 py-6 text-xs text-slate-400 sm:px-5 lg:px-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>智能应用预审打分系统 · 当前版本 {APP_VERSION}</span>
             <Button
@@ -165,14 +185,18 @@ function SingleScorer() {
     setError("");
     setReport(null);
 
+    const meta: ScoreMeta = {
+      name: form.name.trim(),
+      track: form.track,
+      topic: form.topic,
+      cosmocodeUrl: form.cosmocodeUrl.trim(),
+      openlabUrl: form.openlabUrl.trim(),
+      repoUrl: form.repoUrl.trim(),
+    };
+
     try {
       const result = await requestScore({
-        name: form.name.trim(),
-        track: form.track,
-        topic: form.topic,
-        cosmocodeUrl: form.cosmocodeUrl.trim(),
-        openlabUrl: form.openlabUrl.trim(),
-        repoUrl: form.repoUrl.trim(),
+        ...meta,
         dimensions: SCORE_DIMENSIONS,
       });
       setReport(result);
@@ -185,20 +209,20 @@ function SingleScorer() {
         total: result.total,
         calibrated: Boolean(result.calibrated),
         dimensions: SCORE_DIMENSIONS,
-        single: {
-          meta: {
-            name: form.name.trim(),
-            track: form.track,
-            topic: form.topic,
-            cosmocodeUrl: form.cosmocodeUrl.trim(),
-            openlabUrl: form.openlabUrl.trim(),
-            repoUrl: form.repoUrl.trim(),
-          },
-          report: result,
-        },
+        single: { meta, report: result },
       }).catch(() => {});
     } catch (err) {
-      setError(err instanceof Error ? err.message : "评分失败，请稍后重试");
+      const message = err instanceof Error ? err.message : "评分失败，请稍后重试";
+      setError(message);
+      void saveHistory({
+        id: newHistoryId(),
+        kind: "single",
+        createdAt: new Date().toISOString(),
+        title: form.name.trim() || form.topic,
+        subtitle: form.track,
+        dimensions: SCORE_DIMENSIONS,
+        single: { meta, error: message },
+      }).catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -208,10 +232,14 @@ function SingleScorer() {
     <div className="space-y-6">
       <form
         onSubmit={handleSubmit}
-        className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        className="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6"
       >
         <div>
-          <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label
+            htmlFor="name"
+            className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"
+          >
+            <Icon name="app" className="h-4 w-4 text-slate-400" />
             应用名称（选填）
             {autoName && form.name === autoName && (
               <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
@@ -230,7 +258,11 @@ function SingleScorer() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor="track" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label
+              htmlFor="track"
+              className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"
+            >
+              <Icon name="flag" className="h-4 w-4 text-slate-400" />
               赛道
             </label>
             <select
@@ -249,7 +281,11 @@ function SingleScorer() {
             </select>
           </div>
           <div>
-            <label htmlFor="topic" className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label
+              htmlFor="topic"
+              className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"
+            >
+              <Icon name="target" className="h-4 w-4 text-slate-400" />
               赛题
             </label>
             <select
@@ -273,6 +309,7 @@ function SingleScorer() {
           <LinkField
             id="cosmocodeUrl"
             label="COSMO Code 应用链接"
+            icon="link"
             value={form.cosmocodeUrl}
             onChange={(v) => update("cosmocodeUrl", v)}
             onBlur={() => void checkAppLink(form.cosmocodeUrl)}
@@ -283,6 +320,7 @@ function SingleScorer() {
           <LinkField
             id="openlabUrl"
             label="OpenLab 文章链接"
+            icon="article"
             value={form.openlabUrl}
             onChange={(v) => update("openlabUrl", v)}
             placeholder="https://..."
@@ -291,6 +329,7 @@ function SingleScorer() {
           <LinkField
             id="repoUrl"
             label="开源代码仓"
+            icon="code"
             value={form.repoUrl}
             onChange={(v) => update("repoUrl", v)}
             placeholder="https://github.com/..."
@@ -302,11 +341,11 @@ function SingleScorer() {
           以上三个链接至少填写一个，系统将抓取链接内容作为评审依据
         </p>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200">
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
           <p className="bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500">
             评分维度（各项满分 {DIMENSION_MAX_SCORE} 分，按权重加权为五维加权分，满分 100）
           </p>
-          <table className="w-full border-collapse text-left text-xs">
+          <table className="w-full min-w-[520px] border-collapse text-left text-xs">
             <thead>
               <tr className="border-y border-slate-200 bg-white text-slate-500">
                 <th className="px-4 py-2 font-medium">维度</th>
@@ -329,7 +368,7 @@ function SingleScorer() {
             </tbody>
           </table>
           <p className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs leading-relaxed text-slate-500">
-            总分 = 五维加权分 + 开源加分（共享开源代码仓且代码与参赛作品一致，+5；GitHub 代码仓不加分）+ 定向揭榜赛题加分（参选前三个赛题，+10），满分 115。
+            总分 = 五维加权分 + 开源加分（填写开源代码仓且可公开访问，+5）+ 定向揭榜赛题加分（参选前三个赛题，+10），满分 115。「COSMO Code 使用深度」暂不自动评分，留待人工评分。
           </p>
         </div>
 
@@ -361,6 +400,7 @@ function SingleScorer() {
 function LinkField({
   id,
   label,
+  icon,
   value,
   onChange,
   onBlur,
@@ -370,6 +410,7 @@ function LinkField({
 }: {
   id: string;
   label: string;
+  icon: IconName;
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -379,7 +420,11 @@ function LinkField({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700">
+      <label
+        htmlFor={id}
+        className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"
+      >
+        <Icon name={icon} className="h-4 w-4 text-slate-400" />
         {label}
       </label>
       <input

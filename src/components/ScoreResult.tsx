@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import type { ScoreReport } from "@/types";
 import { DIMENSION_MAX_SCORE } from "@/config/dimensions";
+import TopicFlag from "@/components/TopicFlag";
 
 function tone(score: number) {
   if (score >= 85) return { text: "text-emerald-600", bar: "bg-emerald-500" };
@@ -12,10 +14,12 @@ function Gauge({
   value,
   max = DIMENSION_MAX_SCORE,
   label = "加权总分",
+  extra,
 }: {
   value: number;
   max?: number;
   label?: string;
+  extra?: ReactNode;
 }) {
   const radius = 54;
   const circumference = 2 * Math.PI * radius;
@@ -48,7 +52,10 @@ function Gauge({
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-4xl font-bold ${t.text}`}>{Math.round(clamped)}</span>
+        <span className={`text-4xl font-bold ${t.text}`}>
+          {Math.round(clamped)}
+          {extra}
+        </span>
         <span className="text-xs text-slate-400">{label}</span>
       </div>
     </div>
@@ -62,11 +69,13 @@ function Metric({
   value,
   suffix,
   highlight = false,
+  extra,
 }: {
   label: string;
   value: string;
   suffix: string;
   highlight?: boolean;
+  extra?: ReactNode;
 }) {
   return (
     <div
@@ -84,6 +93,7 @@ function Metric({
       >
         {value}
         <span className="text-xs font-normal text-slate-400"> {suffix}</span>
+        {extra}
       </div>
     </div>
   );
@@ -93,7 +103,12 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
   return (
     <section className="space-y-6">
       <div className="flex flex-col items-center gap-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center">
-        <Gauge value={report.total} max={TOTAL_MAX} label="综合总分" />
+        <Gauge
+          value={report.total}
+          max={TOTAL_MAX}
+          label="综合总分"
+          extra={<TopicFlag check={report.directedTopicCheck} />}
+        />
         <div className="flex-1 text-center sm:text-left">
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
             <h2 className="text-xl font-semibold text-slate-800">综合评估结果</h2>
@@ -118,11 +133,18 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
         <Metric label="五维加权分" value={String(Math.round(report.fiveDimScore))} suffix="/ 100" />
         <Metric label="开源加分" value={`+${report.openSourceBonus}`} suffix="/ 5" />
         <Metric label="定向揭榜赛题加分" value={`+${report.directedTopicBonus}`} suffix="/ 10" />
-        <Metric label="综合总分" value={String(Math.round(report.total))} suffix="/ 115" highlight />
+        <Metric
+          label="综合总分"
+          value={String(Math.round(report.total))}
+          suffix="/ 115"
+          highlight
+          extra={<TopicFlag check={report.directedTopicCheck} />}
+        />
       </div>
 
       <p className="text-xs leading-relaxed text-slate-500">
-        总分 = 五维加权分（满分 100）+ 开源加分（共享开源代码仓且代码与参赛作品一致，最高 5；GitHub 代码仓不加分）+ 定向揭榜赛题加分（参选前三个赛题，10）。
+        总分 = 五维加权分（满分 100）+ 开源加分（填写开源代码仓且可公开访问，最高 5）+ 定向揭榜赛题加分（参选前三个赛题，10）。
+        「COSMO Code 使用深度」暂不自动评分，留待人工评分；导出表格中该列带权重与公式，手工填写后会自动重算五维加权分与综合总分。
         {report.openSourceReason ? ` 开源判定：${report.openSourceReason}` : ""}
       </p>
 
@@ -143,10 +165,12 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
                     <a
                       href={s.url}
                       target="_blank"
-                      rel="noreferrer"
-                      className="ml-2 break-all text-indigo-600 hover:underline"
+                      rel="noreferrer noopener"
+                      title={s.url}
+                      className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-600 transition hover:border-indigo-300 hover:bg-indigo-100"
                     >
-                      {s.url}
+                      打开链接
+                      <span aria-hidden="true" className="text-[10px]">↗</span>
                     </a>
                   ) : (
                     <span className="ml-2 text-slate-400">未填写</span>
@@ -163,8 +187,8 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-left text-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[560px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
               <th className="px-4 py-3 font-medium">评分维度</th>
@@ -175,7 +199,8 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {report.dimensions.map((d) => {
-              const t = tone(d.score);
+              const manual = d.score === null;
+              const t = tone(d.score ?? 0);
               return (
                 <tr key={d.key} className="align-top">
                   <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">
@@ -185,22 +210,28 @@ export default function ScoreResult({ report }: { report: ScoreReport }) {
                     {d.weight}%
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-center">
-                    <span className={`text-lg font-bold ${t.text}`}>
-                      {Math.round(d.score)}
-                    </span>
-                    <span className="text-xs font-normal text-slate-400">
-                      {" "}
-                      / {DIMENSION_MAX_SCORE}
-                    </span>
-                    <div className="mx-auto mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className={`h-full rounded-full ${t.bar}`}
-                        style={{
-                          width: `${Math.max(0, Math.min(100, d.score))}%`,
-                          transition: "width 0.7s ease",
-                        }}
-                      />
-                    </div>
+                    {manual ? (
+                      <span className="text-sm font-semibold text-slate-400">待人工评分</span>
+                    ) : (
+                      <>
+                        <span className={`text-lg font-bold ${t.text}`}>
+                          {Math.round(d.score as number)}
+                        </span>
+                        <span className="text-xs font-normal text-slate-400">
+                          {" "}
+                          / {DIMENSION_MAX_SCORE}
+                        </span>
+                        <div className="mx-auto mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className={`h-full rounded-full ${t.bar}`}
+                            style={{
+                              width: `${Math.max(0, Math.min(100, d.score as number))}%`,
+                              transition: "width 0.7s ease",
+                            }}
+                          />
+                        </div>
+                      </>
+                    )}
                   </td>
                   <td className="px-4 py-3 leading-relaxed text-slate-600">
                     {d.reason}

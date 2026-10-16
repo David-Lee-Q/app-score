@@ -10,7 +10,7 @@ export const LINK_RULES: LinkRule[] = [
   {
     key: "cosmocodeUrl",
     label: "COSMO Code应用链接",
-    hint: "https://<端口>-<hash>.code.cosmoplat.cn",
+    hint: "https://<端口>-<hash>.code.cosmoplat.cn 或 https://code.cosmoplat.cn/console/app-detail/<id>",
   },
   {
     key: "openlabUrl",
@@ -20,7 +20,7 @@ export const LINK_RULES: LinkRule[] = [
   {
     key: "repoUrl",
     label: "开源代码仓",
-    hint: "https://gitcode.cosmoplat.com/<用户名>/<仓库名>",
+    hint: "任意可访问的代码仓，如 https://gitcode.cosmoplat.com/<用户名>/<仓库名>",
   },
 ];
 
@@ -31,7 +31,9 @@ export interface LinkCheck {
   message: string;
 }
 
-const REPO_HOSTS = ["gitcode.cosmoplat.com", "github.com", "gitlab.com"];
+function isCosmocodeHost(host: string): boolean {
+  return host === "code.cosmoplat.cn" || host.endsWith(".code.cosmoplat.cn");
+}
 
 export function validateLink(key: LinkKey, raw: string): LinkCheck {
   const value = (raw || "").trim();
@@ -52,10 +54,11 @@ export function validateLink(key: LinkKey, raw: string): LinkCheck {
 
   switch (key) {
     case "cosmocodeUrl": {
-      if (!/\.code\.cosmoplat\.cn$/.test(host)) {
+      if (!isCosmocodeHost(host)) {
         return {
           status: "error",
-          message: "应形如 https://<端口>-<hash>.code.cosmoplat.cn",
+          message:
+            "应形如 https://<端口>-<hash>.code.cosmoplat.cn 或 https://code.cosmoplat.cn/console/app-detail/<id>",
         };
       }
       return { status: "ok", message: "格式正确" };
@@ -78,14 +81,6 @@ export function validateLink(key: LinkKey, raw: string): LinkCheck {
       return { status: "ok", message: "格式正确" };
     }
     case "repoUrl": {
-      const matched =
-        REPO_HOSTS.includes(host) || host.includes("gitlab") || host.includes("gitcode");
-      if (!matched) {
-        return {
-          status: "error",
-          message: "应为 GitCode / GitHub / GitLab 仓库链接",
-        };
-      }
       const segments = url.pathname
         .replace(/^\/+|\/+$/g, "")
         .split("/")

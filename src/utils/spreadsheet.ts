@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import type { ApplicationRow, BatchItemResult, ScoreDimension, ScoreReport } from "@/types";
 import { BUILT_IN_TOPICS, matchBuiltInTopic } from "@/config/topics";
 import { TRACKS } from "@/config/tracks";
+import { decisionLabel, decisionWeight } from "@/config/decisions";
 
 export const TEMPLATE_HEADERS = [
   "应用名称（选填）",
@@ -157,10 +158,10 @@ export function exportSingleResultCsv(
   triggerDownload(blob, `${safeName}_预审打分结果.csv`);
 }
 
-function buildResultsCsv(
+function buildResultRows(
   items: BatchItemResult[],
   dimensions: ScoreDimension[],
-): string {
+): { header: string[]; rows: string[][] } {
   const header = [
     "应用名称",
     "赛道",
@@ -181,7 +182,8 @@ function buildResultsCsv(
     "备注",
   ];
 
-  const lines = items.map((item) => {
+  const rows = items.map((item, index) => {
+    const row = index + 2;
     const scoreByKey = new Map(
       (item.report?.dimensions ?? []).map((d) => [d.key, d.score]),
     );
@@ -190,7 +192,7 @@ function buildResultsCsv(
     );
     const dimensionCells = dimensions.map((d) => {
       const score = scoreByKey.get(d.key);
-      return score === undefined ? "" : String(score);
+      return score === undefined || score === null ? "" : String(score);
     });
     const dimensionReasons = dimensions.map((d) => reasonByKey.get(d.key) ?? "");
     const openSourceReason = item.report?.openSourceReason ?? "";
@@ -200,6 +202,28 @@ function buildResultsCsv(
         : "非定向揭榜赛题，不加定向分"
       : "";
     const overall = item.report?.summary ?? "";
+
+    const dimStartCol = 6;
+    const fiveDimColLetter = colLetter(dimStartCol + dimensions.length);
+    const openSourceColLetter = colLetter(dimStartCol + dimensions.length + 1);
+    const directedColLetter = colLetter(dimStartCol + dimensions.length + 2);
+    const totalWeight =
+      dimensions.reduce((sum, d) => sum + (Number(d.weight) || 0), 0) || 1;
+    const terms = dimensions
+      .map(
+        (d, k) => `${colLetter(dimStartCol + k)}${row}*${Number(d.weight) || 0}`,
+      )
+      .join("+");
+    const fiveDimCell =
+      item.report && dimensions.length
+        ? `=ROUND((${terms})/${totalWeight},0)`
+        : item.report
+          ? String(Math.round(item.report.fiveDimScore))
+          : "";
+    const totalCell = item.report
+      ? `=${fiveDimColLetter}${row}+${openSourceColLetter}${row}+${directedColLetter}${row}`
+      : "";
+
     return [
       item.name,
       item.track,
@@ -208,10 +232,10 @@ function buildResultsCsv(
       item.openlabUrl,
       item.repoUrl,
       ...dimensionCells,
-      item.report ? String(Math.round(item.report.fiveDimScore)) : "",
+      fiveDimCell,
       item.report ? String(item.report.openSourceBonus) : "",
       item.report ? String(item.report.directedTopicBonus) : "",
-      item.report ? String(Math.round(item.report.total)) : "",
+      totalCell,
       ...dimensionReasons,
       openSourceReason,
       directedReason,
@@ -221,11 +245,94 @@ function buildResultsCsv(
     ];
   });
 
-  const csv = [header, ...lines]
+  return { header, rows };
+}
+
+function buildResultsCsv(
+  items: BatchItemResult[],
+  dimensions: ScoreDimension[],
+): string {
+  const { header, rows } = buildResultRows(items, dimensions);
+  return [header, ...rows]
     .map((cells) => cells.map(escapeCsv).join(","))
     .join("\r\n");
+}
 
-  return csv;
+export function exportTrackedXlsx(
+  items: BatchItemResult[],
+  dimensions: ScoreDimension[],
+  filename = "赛道排序结果.xlsx",
+) {
+  const groups = new Map<string, BatchItemResult[]>();
+  for (const item of items) {
+    const key = (item.track || "").trim() || "未填写赛道";
+    const list = groups.get(key);
+    if (list) list.push(item);
+    else groups.set(key, [item]);
+  }
+
+  const workbook = XLSX.utils.book_new();
+  const usedNames = new Set<string>();
+  const fiveDimIndex = 6 + dimensions.length;
+  const totalIndex = fiveDimIndex + 3;
+
+  for (const [track, group] of groups) {
+    const sorted = [...group].sort((a, b) => {
+      const dw = decisionWeight(a.decision) - decisionWeight(b.decision);
+      if (dw !== 0) return dw;
+      return (b.report?.total ?? -1) - (a.report?.total ?? -1);
+    });
+    const { header, rows } = buildResultRows(sorted, dimensions);
+    const sheetRows = [header.concat("评审结果")].concat(
+      rows.map((row, i) => row.concat(decisionLabel(sorted[i].decision))),
+    );
+    const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
+
+    const fiveCol = colLetter(fiveDimIndex);
+    const totalCol = colLetter(totalIndex);
+    for (let i = 0; i < sorted.length; i += 1) {
+      const excelRow = i + 2;
+      const report = sorted[i].report;
+      const cached: Record<string, number> = {
+        [fiveCol]: Math.round(report?.fiveDimScore ?? 0),
+        [totalCol]: Math.round(report?.total ?? 0),
+      };
+      for (const col of [fiveCol, totalCol]) {
+        const addr = `${col}${excelRow}`;
+        const cell = sheet[addr];
+        if (cell && typeof cell.v === "string" && cell.v.startsWith("=")) {
+          sheet[addr] = { t: "n", f: cell.v.slice(1), v: cached[col] };
+        }
+      }
+    }
+
+    XLSX.utils.book_append_sheet(workbook, sheet, uniqueSheetName(track, usedNames));
+  }
+
+  XLSX.writeFile(workbook, filename);
+}
+
+function uniqueSheetName(raw: string, used: Set<string>): string {
+  const base = (raw.replace(/[\\/:*?\[\]<>]/g, "_").trim() || "赛道").slice(0, 28);
+  let name = base;
+  let i = 2;
+  while (used.has(name)) {
+    name = `${base}_${i}`;
+    i += 1;
+  }
+  used.add(name);
+  return name;
+}
+
+function colLetter(index: number): string {
+  let n = index + 1;
+  let s = "";
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 function statusLabel(status: BatchItemResult["status"]): string {

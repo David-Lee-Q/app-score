@@ -7,6 +7,10 @@ import {
   type RepoAccess,
 } from "@/api/score";
 import Button from "@/components/Button";
+import { Icon, type IconName } from "@/components/icons";
+import TopicFlag from "@/components/TopicFlag";
+import SortableHeader from "@/components/SortableHeader";
+import CommentCell from "@/components/CommentCell";
 import { SCORE_DIMENSIONS } from "@/config/dimensions";
 import type { ApplicationRow, BatchItemResult, HistoryEntry, ScoreReport } from "@/types";
 import {
@@ -15,7 +19,9 @@ import {
   parseApplicationsFile,
 } from "@/utils/spreadsheet";
 import { weightedFiveDim } from "@/utils/score";
-import { newHistoryId, saveHistory } from "@/utils/history";
+import { newHistoryId, patchHistoryEntry, saveHistory } from "@/utils/history";
+import { sortBy, toggleSort, type SortState, type SortValue } from "@/utils/sort";
+import { generateRankingPoster } from "@/utils/poster";
 import {
   isLinkKey,
   LINK_RULES,
@@ -72,7 +78,7 @@ async function calibrateAll(items: BatchItemResult[]): Promise<BatchItemResult[]
     if (!cal || !it.report) return it;
     const scoreByKey = new Map(cal.dimensions.map((d) => [d.key, d.score]));
     const dims = it.report.dimensions.map((d) =>
-      scoreByKey.has(d.key) ? { ...d, score: scoreByKey.get(d.key) as number } : d,
+      scoreByKey.has(d.key) ? { ...d, score: scoreByKey.get(d.key) ?? null } : d,
     );
     const fiveDimScore = weightedFiveDim(dims);
     const report: ScoreReport = {
@@ -100,16 +106,44 @@ function statusBadge(status: BatchItemResult["status"]) {
   }
 }
 
-const PREVIEW_COLUMNS = [
-  { key: "name", label: "应用名称（选填）", width: 150, nowrap: true },
-  { key: "track", label: "赛道", width: 100, nowrap: true },
-  { key: "topic", label: "赛题", width: 220, nowrap: true },
-  { key: "cosmocodeUrl", label: "COSMO Code应用链接", width: 260, nowrap: true },
-  { key: "openlabUrl", label: "OpenLab文章链接", width: 260, nowrap: true },
-  { key: "repoUrl", label: "开源代码仓", width: 260, nowrap: true },
-] as const;
+function resultSortValue(item: BatchItemResult, key: string): SortValue {
+  if (key === "name") return item.name || "";
+  const report = item.report;
+  if (!report) return null;
+  switch (key) {
+    case "fiveDim":
+      return report.fiveDimScore;
+    case "openSource":
+      return report.openSourceBonus;
+    case "directed":
+      return report.directedTopicBonus;
+    case "total":
+      return report.total;
+    default: {
+      const dim = report.dimensions.find((d) => d.key === key);
+      return dim?.score ?? null;
+    }
+  }
+}
+
+const PREVIEW_COLUMNS: {
+  key: string;
+  label: string;
+  width: number;
+  nowrap: boolean;
+  icon: IconName;
+}[] = [
+  { key: "name", label: "应用名称（选填）", width: 150, nowrap: true, icon: "app" },
+  { key: "track", label: "赛道", width: 100, nowrap: true, icon: "flag" },
+  { key: "topic", label: "赛题", width: 220, nowrap: true, icon: "target" },
+  { key: "cosmocodeUrl", label: "COSMO Code应用链接", width: 260, nowrap: true, icon: "link" },
+  { key: "openlabUrl", label: "OpenLab文章链接", width: 260, nowrap: true, icon: "article" },
+  { key: "repoUrl", label: "开源代码仓", width: 260, nowrap: true, icon: "code" },
+];
 
 const MIN_COL_WIDTH = 80;
+
+type PreviewEditableKey = LinkKey | "name";
 
 export default function BatchScorer() {
   const [rows, setRows] = useState<ApplicationRow[]>([]);
@@ -119,11 +153,13 @@ export default function BatchScorer() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibrate, setCalibrate] = useState(true);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortState | null>(null);
+  const [savedEntryId, setSavedEntryId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [edit, setEdit] = useState<{
     rowIndex: number;
-    key: LinkKey;
+    key: PreviewEditableKey;
     value: string;
   } | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(
@@ -135,6 +171,7 @@ export default function BatchScorer() {
   const attemptedLinks = useRef<Set<string>>(new Set());
   const [resolvingNames, setResolvingNames] = useState(false);
   const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
+  const [refreshingNameUrl, setRefreshingNameUrl] = useState<string | null>(null);
   const [linkStatus, setLinkStatus] = useState<
     Record<string, { status: number; note: string }>
   >({});
@@ -142,6 +179,7 @@ export default function BatchScorer() {
     null,
   );
   const inputRef = useRef<HTMLInputElement>(null);
+  const nameClickTimer = useRef<number | null>(null);
 
   function startResize(e: React.MouseEvent, index: number) {
     e.preventDefault();
@@ -291,13 +329,51 @@ export default function BatchScorer() {
     setRows((prev) =>
       prev.map((r, i) => (i === rowIndex ? { ...r, [key]: trimmed } : r)),
     );
+    if (key === "name") {
+      const url = rows[rowIndex]?.cosmocodeUrl.trim();
+      if (url) {
+        setAutoNamedUrls((prev) => {
+          const next = new Set(prev);
+          next.delete(url);
+          return next;
+        });
+      }
+    }
     setEdit(null);
+  }
+
+  async function refreshName(rowIndex: number) {
+    const url = rows[rowIndex]?.cosmocodeUrl.trim();
+    if (!url || validateLink("cosmocodeUrl", url).status !== "ok") return;
+    setRefreshingNameUrl(url);
+    try {
+      const res = await resolveAppNames([url]);
+      const info = res[url];
+      setLinkStatus((prev) => ({
+        ...prev,
+        [url]: { status: info?.status ?? 0, note: info?.note ?? "" },
+      }));
+      const name = info?.name?.trim();
+      if (name) {
+        setRows((prev) =>
+          prev.map((r, i) => (i === rowIndex ? { ...r, name } : r)),
+        );
+        setResolvedNames((prev) => ({ ...prev, [url]: name }));
+        setAutoNamedUrls((prev) => new Set([...prev, url]));
+      }
+    } catch {
+      // 忽略刷新失败
+    } finally {
+      setRefreshingNameUrl(null);
+    }
   }
 
   async function handleFile(file: File) {
     setError("");
     setItems([]);
     setExpanded(new Set());
+    setSort(null);
+    setSavedEntryId(null);
     try {
       const parsed = await parseApplicationsFile(file);
       setRows(parsed);
@@ -362,6 +438,7 @@ export default function BatchScorer() {
 
     const results: BatchItemResult[] = rows.map((r) => ({
       ...r,
+      id: newHistoryId(),
       name: r.name.trim() || names[r.cosmocodeUrl.trim()] || "",
       track: r.track.trim(),
       topic: r.topic.trim(),
@@ -421,31 +498,68 @@ export default function BatchScorer() {
     }
 
     setRunning(false);
-    void saveHistory(buildBatchHistory(results, fileName)).catch(() => {});
+    const entry = buildBatchHistory(results, fileName);
+    setSavedEntryId(entry.id);
+    void saveHistory(entry).catch(() => {});
   }
 
-  function toggleExpand(index: number) {
+  function toggleExpand(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
+  function handlePoster() {
+    const base = (fileName || "批量评分").replace(/\.(xlsx|xls|csv)$/i, "");
+    try {
+      generateRankingPoster(items, { fileName: `${base}_排行榜.png` });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成海报失败");
+    }
+  }
+
   const hasResults = items.length > 0;
+
+  const displayItems = useMemo(
+    () => (sort ? sortBy(items, sort, resultSortValue) : items),
+    [items, sort],
+  );
+
+  function handleSort(key: string) {
+    setSort((prev) => toggleSort(prev, key));
+  }
+
+  async function handleCommentChange(itemId: string, comment: string) {
+    const nextItems = items.map((it) =>
+      it.id === itemId ? { ...it, comment: comment || undefined } : it,
+    );
+    setItems(nextItems);
+    if (!savedEntryId) return;
+    try {
+      await patchHistoryEntry(savedEntryId, { batch: { items: nextItems } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存人工评价失败");
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-800">批量待评分应用</h2>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-800">
+              <Icon name="upload" className="h-4 w-4 text-indigo-500" />
+              批量待评分应用
+            </h2>
             <p className="mt-0.5 text-xs text-slate-500">
               下载模板 → 填写多个应用 → 上传 → 一键批量打分
             </p>
           </div>
           <Button type="button" variant="soft" size="sm" onClick={downloadTemplate}>
+            <Icon name="download" className="h-4 w-4" />
             下载表格模板
           </Button>
         </div>
@@ -464,6 +578,7 @@ export default function BatchScorer() {
               : "border-slate-300 bg-slate-50 hover:border-indigo-300"
           }`}
         >
+          <Icon name="upload" className="mb-2 h-8 w-8 text-indigo-400" />
           <p className="text-sm font-medium text-slate-700">点击选择或拖拽上传表格</p>
           <p className="mt-1 text-xs text-slate-400">
             支持 .xlsx / .xls / .csv，表头需含「赛道」「赛题」及链接列
@@ -497,7 +612,7 @@ export default function BatchScorer() {
         {rows.length > 0 && (
           <div>
             <p className="mb-1.5 text-xs text-slate-400">
-              共 {rows.length} 条 · 全部模板字段预览 · 各字段单行展示，超宽以「…」省略（悬停可见完整内容）· 拖拽列标题右边界可调整列宽
+              共 {rows.length} 条 · 全部模板字段单行展示，超宽以「…」省略（悬停可见完整内容）· 点击「应用名称」或链接单元格可手动修改 · 拖拽列标题右边界可调整列宽
             </p>
             <p className="mb-1.5 text-xs text-slate-400">
               链接格式校验：
@@ -548,7 +663,10 @@ export default function BatchScorer() {
                   <tr>
                     {PREVIEW_COLUMNS.map((col, i) => (
                       <th key={col.key} className="relative px-3 py-2 font-medium">
-                        <span className="block truncate">{col.label}</span>
+                        <span className="flex items-center gap-1.5">
+                          <Icon name={col.icon} className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span className="truncate">{col.label}</span>
+                        </span>
                         <span
                           onMouseDown={(e) => startResize(e, i)}
                           className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none bg-transparent hover:bg-indigo-300"
@@ -583,7 +701,8 @@ export default function BatchScorer() {
                         {PREVIEW_COLUMNS.map((col) => {
                           const raw = valueOf(col.key);
                           const isLink = isLinkKey(col.key);
-                          const check = isLink ? validateLink(col.key, raw) : null;
+                          const isEditable = isLink || col.key === "name";
+                          const check = isLink ? validateLink(col.key as LinkKey, raw) : null;
                           const isEmptyAppLink =
                             col.key === "cosmocodeUrl" && check?.status === "empty";
                           const isError =
@@ -616,18 +735,49 @@ export default function BatchScorer() {
                                   ? errMsg
                                   : isWarn
                                     ? warnMsg
-                                    : repoInfo
-                                      ? `${raw}｜${repoInfo.note}`
-                                      : raw || undefined
+                                    : col.key === "name" && row.cosmocodeUrl.trim()
+                                      ? `${raw || "—"}（双击刷新获取）`
+                                      : repoInfo
+                                        ? `${raw}｜${repoInfo.note}`
+                                        : raw || undefined
                               }
                               onClick={
-                                isLink
-                                  ? () =>
-                                      setEdit({
-                                        rowIndex: idx,
-                                        key: col.key as LinkKey,
-                                        value: raw,
-                                      })
+                                isEditable
+                                  ? () => {
+                                      if (col.key === "name") {
+                                        if (nameClickTimer.current) {
+                                          window.clearTimeout(nameClickTimer.current);
+                                        }
+                                        nameClickTimer.current = window.setTimeout(
+                                          () => {
+                                            nameClickTimer.current = null;
+                                            setEdit({
+                                              rowIndex: idx,
+                                              key: "name",
+                                              value: raw,
+                                            });
+                                          },
+                                          250,
+                                        );
+                                      } else {
+                                        setEdit({
+                                          rowIndex: idx,
+                                          key: col.key as PreviewEditableKey,
+                                          value: raw,
+                                        });
+                                      }
+                                    }
+                                  : undefined
+                              }
+                              onDoubleClick={
+                                col.key === "name" && row.cosmocodeUrl.trim()
+                                  ? () => {
+                                      if (nameClickTimer.current) {
+                                        window.clearTimeout(nameClickTimer.current);
+                                        nameClickTimer.current = null;
+                                      }
+                                      void refreshName(idx);
+                                    }
                                   : undefined
                               }
                               className={`px-3 py-2 ${
@@ -639,7 +789,7 @@ export default function BatchScorer() {
                                   ? "cursor-pointer font-medium text-rose-600 hover:bg-rose-50"
                                   : isWarn
                                     ? "cursor-pointer bg-amber-50 font-medium text-amber-700 hover:bg-amber-100"
-                                    : isLink
+                                    : isEditable
                                       ? "cursor-pointer text-slate-500 hover:bg-slate-50"
                                       : "text-slate-500"
                               }`}
@@ -671,7 +821,20 @@ export default function BatchScorer() {
                                   {isWarn && <span className="mr-1">⚠</span>}
                                   {col.key === "name" ? (
                                     <span className="flex items-center gap-1">
-                                      <span className="truncate">{raw}</span>
+                                      <span className="truncate">
+                                        {raw || (
+                                          <span className="text-slate-300">
+                                            {row.cosmocodeUrl.trim()
+                                              ? "双击刷新获取名称"
+                                              : "点击填写名称"}
+                                          </span>
+                                        )}
+                                      </span>
+                                      {refreshingNameUrl === row.cosmocodeUrl.trim() && (
+                                        <span className="shrink-0 animate-spin text-indigo-500">
+                                          <Icon name="refresh" className="h-3.5 w-3.5" />
+                                        </span>
+                                      )}
                                       {raw && autoNamedUrls.has(row.cosmocodeUrl.trim()) && (
                                         <span
                                           className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
@@ -707,7 +870,10 @@ export default function BatchScorer() {
             className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
           />
           <span>
-            <span className="font-medium text-slate-700">全局横向校准</span>
+            <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+              <Icon name="scale" className="h-4 w-4 text-slate-400" />
+              全局横向校准
+            </span>
             <span className="ml-2 text-xs text-slate-500">
               全部评完后在同一维度上横向比对并微调分值，保证跨应用可比（建议开启）
             </span>
@@ -760,36 +926,70 @@ export default function BatchScorer() {
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500">
                 <tr>
-                  <th className="px-3 py-2.5 font-medium">应用名称</th>
-                  <th className="px-3 py-2.5 font-medium">赛道</th>
+                  <SortableHeader
+                    label="应用名称"
+                    sortKey="name"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="left"
+                    className="px-3 py-2.5 font-medium"
+                  />
+                  <th className="px-3 py-2.5 text-center font-medium">赛道</th>
                   {SCORE_DIMENSIONS.map((d) => (
-                    <th key={d.key} className="px-3 py-2.5 text-center font-medium">
-                      {d.name}
-                      <span className="block text-[10px] font-normal text-slate-400">
-                        {d.weight}%
-                      </span>
-                    </th>
+                    <SortableHeader
+                      key={d.key}
+                      label={d.name}
+                      subtitle={`${d.weight}%`}
+                      sortKey={d.key}
+                      sort={sort}
+                      onSort={handleSort}
+                      className="px-3 py-2.5 font-medium"
+                    />
                   ))}
-                  <th className="border-l border-indigo-100 bg-indigo-50 px-3 py-2.5 text-center font-medium text-indigo-600">
-                    五维分
-                  </th>
-                  <th className="px-3 py-2.5 text-center font-medium">开源加分</th>
-                  <th className="px-3 py-2.5 text-center font-medium">定向加分</th>
-                  <th className="bg-indigo-600 px-3 py-2.5 text-center font-medium text-white">
-                    综合总分
-                  </th>
+                  <SortableHeader
+                    label="五维分"
+                    sortKey="fiveDim"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="border-l border-indigo-100 bg-indigo-50 px-3 py-2.5 font-medium text-indigo-600"
+                  />
+                  <SortableHeader
+                    label="开源加分"
+                    sortKey="openSource"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-2.5 font-medium"
+                  />
+                  <SortableHeader
+                    label="定向加分"
+                    sortKey="directed"
+                    sort={sort}
+                    onSort={handleSort}
+                    className="px-3 py-2.5 font-medium"
+                  />
+                  <SortableHeader
+                    label="综合总分"
+                    sortKey="total"
+                    sort={sort}
+                    onSort={handleSort}
+                    hoverClass="hover:text-white"
+                    activeClass="text-white"
+                    className="bg-indigo-600 px-3 py-2.5 font-medium text-white"
+                  />
                   <th className="px-3 py-2.5 text-center font-medium">状态</th>
                   <th className="px-3 py-2.5 text-center font-medium">详情</th>
+                  <th className="px-3 py-2.5 text-center font-medium">人工评价</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {items.map((item, idx) => {
+                {displayItems.map((item) => {
                   const scoreByKey = new Map(
                     (item.report?.dimensions ?? []).map((d) => [d.key, d.score]),
                   );
-                  const isOpen = expanded.has(idx);
+                  const rowKey = item.id ?? item.name;
+                  const isOpen = expanded.has(rowKey);
                   return (
-                    <Fragment key={idx}>
+                    <Fragment key={rowKey}>
                       <tr className="text-slate-700">
                         <td className="max-w-[200px] truncate px-3 py-2.5">
                           <div className="font-medium text-slate-800">{item.name}</div>
@@ -802,8 +1002,13 @@ export default function BatchScorer() {
                           const value = scoreByKey.get(d.key);
                           return (
                             <td key={d.key} className="px-3 py-2.5 text-center">
-                              {value === undefined ? (
-                                <span className="text-slate-300">—</span>
+                              {value === undefined || value === null ? (
+                                <span
+                                  className="text-xs text-slate-400"
+                                  title="该维度暂不自动评分，留待人工评分"
+                                >
+                                  待评
+                                </span>
                               ) : (
                                 <span className="font-semibold text-slate-700">{value}</span>
                               )}
@@ -849,6 +1054,7 @@ export default function BatchScorer() {
                               >
                                 {Math.round(item.report.total)}
                               </span>
+                              <TopicFlag check={item.report.directedTopicCheck} />
                               {item.report.disqualified && (
                                 <div className="text-[10px] leading-tight text-rose-100">
                                   应用链接无效
@@ -866,16 +1072,26 @@ export default function BatchScorer() {
                               type="button"
                               variant="ghost"
                               size="xs"
-                              onClick={() => toggleExpand(idx)}
+                              onClick={() => toggleExpand(rowKey)}
                             >
                               {isOpen ? "收起" : "查看"}
                             </Button>
                           )}
                         </td>
+                        <td className="px-3 py-2.5 text-center align-top">
+                          {item.id && (
+                            <CommentCell
+                              value={item.comment}
+                              onCommit={(comment) =>
+                                void handleCommentChange(item.id as string, comment)
+                              }
+                            />
+                          )}
+                        </td>
                       </tr>
                       {isOpen && (
                         <tr className="bg-slate-50/60">
-                          <td colSpan={SCORE_DIMENSIONS.length + 8} className="px-4 py-3">
+                          <td colSpan={SCORE_DIMENSIONS.length + 9} className="px-4 py-3">
                             {item.error && (
                               <p className="text-sm text-rose-600">{item.error}</p>
                             )}
@@ -913,7 +1129,7 @@ export default function BatchScorer() {
                                           </span>
                                         </span>
                                         <span className="font-semibold text-indigo-600">
-                                          {d.score}
+                                          {d.score === null ? "待评" : d.score}
                                         </span>
                                       </div>
                                       <p className="mt-1 text-xs leading-relaxed text-slate-500">
@@ -937,22 +1153,32 @@ export default function BatchScorer() {
       )}
 
       {hasResults && (
-        <div className="flex justify-center pt-2">
+        <div className="flex flex-wrap justify-center gap-3 pt-2">
           <Button
             type="button"
             variant="secondary"
             size="sm"
             onClick={() => exportResultsCsv(items, SCORE_DIMENSIONS)}
           >
+            <Icon name="download" className="h-4 w-4" />
             导出结果 CSV
+          </Button>
+          <Button type="button" variant="primary" size="sm" onClick={handlePoster}>
+            <Icon name="chart" className="h-4 w-4" />
+            生成排序海报
           </Button>
         </div>
       )}
 
       {edit &&
         (() => {
-          const rule = LINK_RULES.find((r) => r.key === edit.key);
-          const check = validateLink(edit.key, edit.value);
+          const isName = edit.key === "name";
+          const rule = isName
+            ? undefined
+            : LINK_RULES.find((r) => r.key === edit.key);
+          const check = isName
+            ? ({ status: "ok", message: "" } as const)
+            : validateLink(edit.key as LinkKey, edit.value);
           return (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -963,10 +1189,12 @@ export default function BatchScorer() {
                 onClick={(e) => e.stopPropagation()}
               >
                 <h3 className="text-base font-semibold text-slate-800">
-                  修改「{rule?.label}」
+                  修改「{isName ? "应用名称" : rule?.label}」
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  参考格式：{rule?.hint}
+                  {isName
+                    ? "留空将根据 COSMO Code 应用链接自动匹配；手动填写的名称在批量评分时优先使用"
+                    : `参考格式：${rule?.hint}`}
                 </p>
                 <input
                   autoFocus
@@ -978,20 +1206,22 @@ export default function BatchScorer() {
                     if (e.key === "Enter") applyEdit();
                     if (e.key === "Escape") setEdit(null);
                   }}
-                  placeholder={rule?.hint}
+                  placeholder={isName ? "请输入应用名称" : rule?.hint}
                   className="mt-3 w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                 />
-                <p
-                  className={`mt-2 text-xs ${
-                    check.status === "ok"
-                      ? "text-emerald-600"
-                      : check.status === "error"
-                        ? "text-rose-600"
-                        : "text-slate-400"
-                  }`}
-                >
-                  {check.status === "ok" ? "✓ 格式正确" : check.message}
-                </p>
+                {!isName && (
+                  <p
+                    className={`mt-2 text-xs ${
+                      check.status === "ok"
+                        ? "text-emerald-600"
+                        : check.status === "error"
+                          ? "text-rose-600"
+                          : "text-slate-400"
+                    }`}
+                  >
+                    {check.status === "ok" ? "✓ 格式正确" : check.message}
+                  </p>
+                )}
                 <p className="mt-1 text-[11px] text-slate-400">
                   修改需点击「确认修改」后生效
                 </p>

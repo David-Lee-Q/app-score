@@ -26,12 +26,12 @@ export interface CalibrateItem {
   name: string;
   topic: string;
   summary: string;
-  dimensions: { key: string; name: string; score: number }[];
+  dimensions: { key: string; name: string; score: number | null }[];
 }
 
 export interface CalibrateResult {
   index: number;
-  dimensions: { key: string; score: number }[];
+  dimensions: { key: string; score: number | null }[];
 }
 
 export async function requestCalibrate(

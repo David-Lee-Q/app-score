@@ -95,24 +95,42 @@ async function fetchText(url, timeout = 15000) {
   try {
     const resp = await fetch(url, {
       signal: controller.signal,
-      redirect: "manual",
+      redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0 PreReviewBot/1.0" },
     });
-    const location = resp.headers.get("location") || "";
     let text = "";
     if (resp.ok) text = await resp.text();
-    return { status: resp.status, ok: resp.ok, location, text };
+    return { status: resp.status, ok: resp.ok, url: resp.url || url, text };
   } catch (err) {
-    return { status: 0, ok: false, error: err.message };
+    return { status: 0, ok: false, url, error: err.message };
   } finally {
     clearTimeout(timer);
   }
 }
 
-const LOGIN_HINT = /sign[_-]?in|login|请先登录/i;
+const LOGIN_HINT = /sign[_-]?in|\/login|请先登录|please log ?in/i;
+const AUTH_HOST_HINT = /(^|[.-])(iam|sso|auth|login|signin|account|accounts|oauth|idp)([.-]|$)/i;
+
+function normalizeRepoUrl(input) {
+  const parsed = safeUrl(input);
+  if (!parsed) return null;
+  parsed.protocol = "https:";
+  parsed.search = "";
+  parsed.hash = "";
+  let path = parsed.pathname.replace(/\.git$/i, "").replace(/\/+$/, "");
+  const gitlabSep = path.indexOf("/-/");
+  if (gitlabSep !== -1) path = path.slice(0, gitlabSep);
+  path = path.replace(
+    /\/(tree|blob|raw|commits?|releases?|tags|pulls?|issues?|archive)\/.*$/i,
+    "",
+  );
+  path = path.replace(/\.(zip|tar\.gz|tgz|tar)$/i, "");
+  parsed.pathname = path || "/";
+  return parsed;
+}
 
 export async function probeRepoAccess(url) {
-  const parsed = safeUrl(url);
+  const parsed = normalizeRepoUrl(url);
   if (!parsed) {
     return { accessible: false, private: true, status: 0, note: "链接格式无效" };
   }
@@ -134,17 +152,30 @@ export async function probeRepoAccess(url) {
     return { accessible: false, private: true, status: r.status || 0, note: "无法访问（可能私有或网络受限）" };
   }
 
-  const res = await fetchText(url, 15000);
-  if (res.status >= 300 && res.status < 400) {
-    if (LOGIN_HINT.test(res.location)) {
-      return { accessible: false, private: true, status: res.status, note: "跳转登录页，私有仓库" };
-    }
-    return { accessible: false, private: true, status: res.status, note: `重定向（HTTP ${res.status}）` };
+  const res = await fetchText(parsed.href, 15000);
+  let finalUrl = null;
+  try {
+    finalUrl = new URL(res.url || parsed.href);
+  } catch {
+    finalUrl = null;
+  }
+  const finalPath = finalUrl ? finalUrl.pathname.toLowerCase() : "";
+  const finalHost = finalUrl ? finalUrl.hostname.toLowerCase() : "";
+  if (LOGIN_HINT.test(finalPath)) {
+    return { accessible: false, private: true, status: res.status || 0, note: "跳转登录页，私有仓库" };
+  }
+  if (finalHost && finalHost !== host && AUTH_HOST_HINT.test(finalHost)) {
+    return { accessible: false, private: true, status: res.status || 0, note: "跳转统一登录，私有仓库" };
   }
   if (res.ok) {
-    const t = (res.text || "").toLowerCase();
-    if (t.includes("sign in to continue") || t.includes("请先登录")) {
-      return { accessible: false, private: true, status: res.status, note: "需登录访问，私有仓库" };
+    const t = (res.text || "").slice(0, 40000).toLowerCase();
+    if (
+      t.includes("sign in to continue") ||
+      t.includes("请先登录") ||
+      t.includes("repository not found") ||
+      t.includes("project not found")
+    ) {
+      return { accessible: false, private: true, status: res.status, note: "需登录或不可访问" };
     }
     return { accessible: true, private: false, status: res.status, note: "公开可访问" };
   }

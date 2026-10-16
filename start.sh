@@ -7,9 +7,7 @@ if [ -f .env ]; then
   set +a
 fi
 
-node server/index.js &
-SERVER_PID=$!
+# 前端构建产物由后端（Express）统一托管，单服务单端口
+npm run build
 
-trap "kill $SERVER_PID" EXIT
-
-npm run dev
+exec node server/index.js
