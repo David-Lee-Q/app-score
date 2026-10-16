@@ -1,4 +1,4 @@
-import type { HistoryEntry, ReviewDecision } from "@/types";
+import type { BatchItemResult, HistoryEntry, ReviewDecision } from "@/types";
 
 export function newHistoryId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -48,7 +48,7 @@ export async function patchHistoryDecision(
 
 export async function patchHistoryEntry(
   id: string,
-  patch: Partial<HistoryEntry>,
+  patch: Record<string, unknown>,
 ): Promise<void> {
   const res = await fetch(`/api/history/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -56,4 +56,20 @@ export async function patchHistoryEntry(
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`更新历史记录失败（HTTP ${res.status}）`);
+}
+
+export async function patchHistoryItem(
+  id: string,
+  itemId: string,
+  patch: Partial<BatchItemResult>,
+): Promise<void> {
+  const res = await fetch(
+    `/api/history/${encodeURIComponent(id)}/items/${encodeURIComponent(itemId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  if (!res.ok) throw new Error(`更新应用数据失败（HTTP ${res.status}）`);
 }

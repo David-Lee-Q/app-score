@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useState, type CSSProperties } from "react";
-import type { BatchItemResult, HistoryEntry, ReviewDecision } from "@/types";
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import type { BatchItemResult, HistoryEntry, ReviewDecision, ScoreReport } from "@/types";
 import ScoreResult from "@/components/ScoreResult";
 import Button from "@/components/Button";
 import { Icon } from "@/components/icons";
@@ -11,7 +11,7 @@ import {
   exportSingleResultCsv,
   exportTrackedXlsx,
 } from "@/utils/spreadsheet";
-import { deleteHistory, fetchHistory, patchHistoryDecision, patchHistoryEntry, newHistoryId } from "@/utils/history";
+import { deleteHistory, fetchHistory, patchHistoryDecision, patchHistoryEntry, patchHistoryItem, newHistoryId } from "@/utils/history";
 import { weightedFiveDim } from "@/utils/score";
 import { sortBy, toggleSort, type SortState, type SortValue } from "@/utils/sort";
 import { REVIEW_DECISIONS } from "@/config/decisions";
@@ -222,6 +222,8 @@ function batchResultSortValue(item: BatchItemResult, key: string): SortValue {
   }
 }
 
+type DecisionFilter = ReviewDecision | "pending";
+
 function BatchTable({
   entry,
   onDecision,
@@ -249,6 +251,9 @@ function BatchTable({
   const showTrackTopic = !sortByTopic;
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [sort, setSort] = useState<SortState | null>(null);
+  const [decisionFilters, setDecisionFilters] = useState<
+    Record<string, DecisionFilter | null>
+  >({});
 
   function handleSort(key: string) {
     setSort((prev) => toggleSort(prev, key));
@@ -341,8 +346,87 @@ function BatchTable({
     );
   }
 
-  function renderTable(rows: BatchItemResult[]) {
-    const display = sort ? sortBy(rows, sort, batchResultSortValue) : rows;
+  function renderDecisionTags(groupKey: string, rows: BatchItemResult[]) {
+    const activeFilter = decisionFilters[groupKey] ?? null;
+    const btnBase =
+      "rounded-full border px-2 py-0.5 text-[11px] transition whitespace-nowrap";
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() =>
+            setDecisionFilters((prev) => ({ ...prev, [groupKey]: null }))
+          }
+          className={`${btnBase} ${
+            activeFilter === null
+              ? "border-indigo-300 bg-indigo-100 text-indigo-700"
+              : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+          }`}
+        >
+          全部 {rows.length}
+        </button>
+        {REVIEW_DECISIONS.map((d) => {
+          const count = rows.filter((r) => r.decision === d.value).length;
+          const isActive = activeFilter === d.value;
+          return (
+            <button
+              key={d.value}
+              type="button"
+              title={
+                isActive ? `取消筛选「${d.label}」` : `筛选「${d.label}」`
+              }
+              onClick={() =>
+                setDecisionFilters((prev) => ({
+                  ...prev,
+                  [groupKey]: prev[groupKey] === d.value ? null : d.value,
+                }))
+              }
+              className={`${btnBase} ${
+                isActive
+                  ? `${d.active} shadow-sm`
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+              }`}
+            >
+              {d.label} {count}
+            </button>
+          );
+        })}
+        {(() => {
+          const pendingCount = rows.filter((r) => !r.decision).length;
+          const isActive = activeFilter === "pending";
+          return (
+            <button
+              type="button"
+              title={isActive ? "取消筛选「待评」" : "筛选「待评」（未设置评审状态）"}
+              onClick={() =>
+                setDecisionFilters((prev) => ({
+                  ...prev,
+                  [groupKey]: prev[groupKey] === "pending" ? null : "pending",
+                }))
+              }
+              className={`${btnBase} ml-2 border-dashed ${
+                isActive
+                  ? "border-indigo-300 bg-indigo-100 text-indigo-700 shadow-sm"
+                  : "border-slate-300 bg-white text-slate-500 hover:border-slate-400 hover:text-slate-700"
+              }`}
+            >
+              待评 {pendingCount}
+            </button>
+          );
+        })()}
+      </div>
+    );
+  }
+
+  function renderTable(rows: BatchItemResult[], groupKey: string) {
+    const activeFilter = decisionFilters[groupKey] ?? null;
+    const filtered =
+      activeFilter === "pending"
+        ? rows.filter((r) => !r.decision)
+        : activeFilter
+          ? rows.filter((r) => r.decision === activeFilter)
+          : rows;
+    const display = sort ? sortBy(filtered, sort, batchResultSortValue) : filtered;
     return (
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1320px] whitespace-nowrap text-left text-sm">
@@ -436,6 +520,16 @@ function BatchTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
+            {display.length === 0 && (
+              <tr>
+                <td
+                  colSpan={colCount}
+                  className="px-4 py-6 text-center text-xs text-slate-400"
+                >
+                  该评审状态下暂无应用
+                </td>
+              </tr>
+            )}
             {display.map((item, idx) => {
               const rowKey = item.id ?? `row-${idx}`;
               const dimByKey = new Map(
@@ -639,7 +733,13 @@ function BatchTable({
               key={group.key}
               className="overflow-hidden rounded-xl border border-slate-200 bg-white"
             >
-              {renderTable(group.rows)}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                <span className="text-xs text-slate-400">
+                  全部应用 {group.rows.length} 个
+                </span>
+                {renderDecisionTags(group.key, group.rows)}
+              </div>
+              {renderTable(group.rows, group.key)}
             </div>
           );
         }
@@ -662,18 +762,9 @@ function BatchTable({
                   <span className="text-xs text-slate-400">均分 {avg}</span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 text-[11px]">
-                {REVIEW_DECISIONS.map((d) => (
-                  <span
-                    key={d.value}
-                    className={`rounded-full border px-2 py-0.5 ${d.active}`}
-                  >
-                    {d.label} {group.rows.filter((r) => r.decision === d.value).length}
-                  </span>
-                ))}
-              </div>
+              {renderDecisionTags(group.key, group.rows)}
             </div>
-            {renderTable(group.rows)}
+            {renderTable(group.rows, group.key)}
           </div>
         );
       })}
@@ -689,6 +780,16 @@ export default function HistoryPanel() {
   const [deleteTarget, setDeleteTarget] = useState<HistoryEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [refreshingNameId, setRefreshingNameId] = useState<string | null>(null);
+  const savingRef = useRef(0);
+
+  async function persist(task: () => Promise<void>) {
+    savingRef.current += 1;
+    try {
+      await task();
+    } finally {
+      savingRef.current -= 1;
+    }
+  }
 
   const sameNameOf = useCallback(
     (target: HistoryEntry) =>
@@ -716,6 +817,18 @@ export default function HistoryPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (savingRef.current > 0) return;
+      try {
+        setEntries(await fetchHistory());
+      } catch {
+        // 轮询失败时保持当前数据
+      }
+    }, 8000);
+    return () => clearInterval(timer);
+  }, []);
 
   async function confirmDelete() {
     if (!deleteTarget || deleting) return;
@@ -763,7 +876,7 @@ export default function HistoryPanel() {
       }),
     );
     try {
-      await patchHistoryDecision(entry.id, itemId, decision);
+      await persist(() => patchHistoryDecision(entry.id, itemId, decision));
     } catch (err) {
       setEntries((prev) =>
         prev.map((e) =>
@@ -784,43 +897,43 @@ export default function HistoryPanel() {
   ) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const prevItems = entry.batch.items;
-    let changed = false;
-    const nextItems = entry.batch.items.map((it) => {
-      if (it.id !== itemId || !it.report) return it;
-      const target = it.report.dimensions.find((d) => d.key === dimKey);
-      if (!target || target.score === value) return it;
-      changed = true;
-      const base =
-        target.originalScore !== undefined ? target.originalScore : target.score;
-      const dimensions = it.report.dimensions.map((d) =>
-        d.key === dimKey
-          ? { ...d, score: value, originalScore: base, edited: value !== base }
-          : d,
-      );
-      const fiveDimScore = weightedFiveDim(dimensions);
-      return {
-        ...it,
-        report: {
-          ...it.report,
-          dimensions,
-          fiveDimScore,
-          total:
-            fiveDimScore +
-            it.report.openSourceBonus +
-            it.report.directedTopicBonus,
-        },
-      };
-    });
-    if (!changed) return;
+    const current = prevItems.find((it) => it.id === itemId);
+    if (!current || !current.report) return;
+    const target = current.report.dimensions.find((d) => d.key === dimKey);
+    if (!target || target.score === value) return;
+    const base =
+      target.originalScore !== undefined ? target.originalScore : target.score;
+    const dimensions = current.report.dimensions.map((d) =>
+      d.key === dimKey
+        ? { ...d, score: value, originalScore: base, edited: value !== base }
+        : d,
+    );
+    const fiveDimScore = weightedFiveDim(dimensions);
+    const report: ScoreReport = {
+      ...current.report,
+      dimensions,
+      fiveDimScore,
+      total:
+        fiveDimScore +
+        current.report.openSourceBonus +
+        current.report.directedTopicBonus,
+    };
+    const updated: BatchItemResult = { ...current, report };
     setEntries((prev) =>
       prev.map((e) =>
         e.id === entry.id && e.batch
-          ? { ...e, batch: { ...e.batch, items: nextItems } }
+          ? {
+              ...e,
+              batch: {
+                ...e.batch,
+                items: e.batch.items.map((it) => (it.id === itemId ? updated : it)),
+              },
+            }
           : e,
       ),
     );
     try {
-      await patchHistoryEntry(entry.id, { batch: { items: nextItems } });
+      await persist(() => patchHistoryItem(entry.id, itemId, { report }));
     } catch (err) {
       setEntries((prev) =>
         prev.map((e) =>
@@ -841,61 +954,59 @@ export default function HistoryPanel() {
   ) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const prevItems = entry.batch.items;
-    let changed = false;
-    const nextItems = entry.batch.items.map((it) => {
-      if (it.id !== itemId || !it.report) return it;
-      const report = it.report;
-      if (which === "openSourceBonus") {
-        const base =
-          report.openSourceOriginal !== undefined
-            ? report.openSourceOriginal
-            : report.openSourceBonus;
-        const edited = value !== base;
-        if (report.openSourceBonus === value && Boolean(report.openSourceEdited) === edited) {
-          return it;
-        }
-        changed = true;
-        return {
-          ...it,
-          report: {
-            ...report,
-            openSourceBonus: value,
-            openSourceOriginal: base,
-            openSourceEdited: edited,
-            total: report.fiveDimScore + value + report.directedTopicBonus,
-          },
-        };
+    const current = prevItems.find((it) => it.id === itemId);
+    if (!current || !current.report) return;
+    const report = current.report;
+    let next: ScoreReport;
+    if (which === "openSourceBonus") {
+      const base =
+        report.openSourceOriginal !== undefined
+          ? report.openSourceOriginal
+          : report.openSourceBonus;
+      const edited = value !== base;
+      if (report.openSourceBonus === value && Boolean(report.openSourceEdited) === edited) {
+        return;
       }
+      next = {
+        ...report,
+        openSourceBonus: value,
+        openSourceOriginal: base,
+        openSourceEdited: edited,
+        total: report.fiveDimScore + value + report.directedTopicBonus,
+      };
+    } else {
       const base =
         report.directedOriginal !== undefined
           ? report.directedOriginal
           : report.directedTopicBonus;
       const edited = value !== base;
       if (report.directedTopicBonus === value && Boolean(report.directedEdited) === edited) {
-        return it;
+        return;
       }
-      changed = true;
-      return {
-        ...it,
-        report: {
-          ...report,
-          directedTopicBonus: value,
-          directedOriginal: base,
-          directedEdited: edited,
-          total: report.fiveDimScore + report.openSourceBonus + value,
-        },
+      next = {
+        ...report,
+        directedTopicBonus: value,
+        directedOriginal: base,
+        directedEdited: edited,
+        total: report.fiveDimScore + report.openSourceBonus + value,
       };
-    });
-    if (!changed) return;
+    }
+    const updated: BatchItemResult = { ...current, report: next };
     setEntries((prev) =>
       prev.map((e) =>
         e.id === entry.id && e.batch
-          ? { ...e, batch: { ...e.batch, items: nextItems } }
+          ? {
+              ...e,
+              batch: {
+                ...e.batch,
+                items: e.batch.items.map((it) => (it.id === itemId ? updated : it)),
+              },
+            }
           : e,
       ),
     );
     try {
-      await patchHistoryEntry(entry.id, { batch: { items: nextItems } });
+      await persist(() => patchHistoryItem(entry.id, itemId, { report: next }));
     } catch (err) {
       setEntries((prev) =>
         prev.map((e) =>
@@ -915,18 +1026,24 @@ export default function HistoryPanel() {
   ) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const prevItems = entry.batch.items;
-    const nextItems = entry.batch.items.map((it) =>
-      it.id === itemId ? { ...it, comment: comment || undefined } : it,
-    );
+    const current = prevItems.find((it) => it.id === itemId);
+    if (!current) return;
+    const updated: BatchItemResult = { ...current, comment: comment || undefined };
     setEntries((prev) =>
       prev.map((e) =>
         e.id === entry.id && e.batch
-          ? { ...e, batch: { ...e.batch, items: nextItems } }
+          ? {
+              ...e,
+              batch: {
+                ...e.batch,
+                items: e.batch.items.map((it) => (it.id === itemId ? updated : it)),
+              },
+            }
           : e,
       ),
     );
     try {
-      await patchHistoryEntry(entry.id, { batch: { items: nextItems } });
+      await persist(() => patchHistoryItem(entry.id, itemId, { comment: comment || "" }));
     } catch (err) {
       setEntries((prev) =>
         prev.map((e) =>
@@ -957,18 +1074,22 @@ export default function HistoryPanel() {
         return;
       }
       const prevItems = entry.batch.items;
-      const nextItems = entry.batch.items.map((it) =>
-        it.id === itemId ? { ...it, name } : it,
-      );
+      const updated: BatchItemResult = { ...item, name };
       setEntries((prev) =>
         prev.map((e) =>
           e.id === entry.id && e.batch
-            ? { ...e, batch: { ...e.batch, items: nextItems } }
+            ? {
+                ...e,
+                batch: {
+                  ...e.batch,
+                  items: e.batch.items.map((it) => (it.id === itemId ? updated : it)),
+                },
+              }
             : e,
         ),
       );
       try {
-        await patchHistoryEntry(entry.id, { batch: { items: nextItems } });
+        await persist(() => patchHistoryItem(entry.id, itemId, { name }));
       } catch (err) {
         setEntries((prev) =>
           prev.map((e) =>
@@ -1027,7 +1148,13 @@ export default function HistoryPanel() {
       prev.map((e) => (e.id === entry.id ? { ...e, batch: nextBatch } : e)),
     );
     try {
-      await patchHistoryEntry(entry.id, { batch: nextBatch });
+      await patchHistoryEntry(entry.id, {
+        batch: {
+          sortByTopic,
+          originalOrder,
+          originalOrderAt: nextBatch.originalOrderAt,
+        },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "更新排序失败");
       void load();

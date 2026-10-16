@@ -117,6 +117,28 @@ app.patch("/api/history/:id/decision", async (req, res) => {
   res.json({ ok: true, decision: item.decision ?? null });
 });
 
+app.patch("/api/history/:id/items/:itemId", async (req, res) => {
+  const list = await readHistory();
+  const entry = list.find((e) => e && e.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "未找到该记录" });
+  if (!entry.batch || !Array.isArray(entry.batch.items)) {
+    return res.status(400).json({ error: "该记录不是批量评分" });
+  }
+  const index = entry.batch.items.findIndex(
+    (it) => it && it.id === req.params.itemId,
+  );
+  if (index === -1) return res.status(400).json({ error: "未找到该应用" });
+  const patch = req.body && typeof req.body === "object" ? req.body : {};
+  const current = entry.batch.items[index];
+  const merged = { ...current, ...patch, id: current.id };
+  if (patch.report && typeof patch.report === "object") {
+    merged.report = { ...current.report, ...patch.report };
+  }
+  entry.batch.items[index] = merged;
+  await writeHistory(list);
+  res.json({ ok: true, item: merged });
+});
+
 app.patch("/api/history/:id", async (req, res) => {
   const list = await readHistory();
   const index = list.findIndex((e) => e && e.id === req.params.id);

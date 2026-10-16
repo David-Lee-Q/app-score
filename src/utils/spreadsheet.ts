@@ -182,8 +182,7 @@ function buildResultRows(
     "备注",
   ];
 
-  const rows = items.map((item, index) => {
-    const row = index + 2;
+  const rows = items.map((item) => {
     const scoreByKey = new Map(
       (item.report?.dimensions ?? []).map((d) => [d.key, d.score]),
     );
@@ -203,26 +202,10 @@ function buildResultRows(
       : "";
     const overall = item.report?.summary ?? "";
 
-    const dimStartCol = 6;
-    const fiveDimColLetter = colLetter(dimStartCol + dimensions.length);
-    const openSourceColLetter = colLetter(dimStartCol + dimensions.length + 1);
-    const directedColLetter = colLetter(dimStartCol + dimensions.length + 2);
-    const totalWeight =
-      dimensions.reduce((sum, d) => sum + (Number(d.weight) || 0), 0) || 1;
-    const terms = dimensions
-      .map(
-        (d, k) => `${colLetter(dimStartCol + k)}${row}*${Number(d.weight) || 0}`,
-      )
-      .join("+");
-    const fiveDimCell =
-      item.report && dimensions.length
-        ? `=ROUND((${terms})/${totalWeight},0)`
-        : item.report
-          ? String(Math.round(item.report.fiveDimScore))
-          : "";
-    const totalCell = item.report
-      ? `=${fiveDimColLetter}${row}+${openSourceColLetter}${row}+${directedColLetter}${row}`
+    const fiveDimCell = item.report
+      ? String(Math.round(item.report.fiveDimScore))
       : "";
+    const totalCell = item.report ? String(Math.round(item.report.total)) : "";
 
     return [
       item.name,
@@ -273,8 +256,6 @@ export function exportTrackedXlsx(
 
   const workbook = XLSX.utils.book_new();
   const usedNames = new Set<string>();
-  const fiveDimIndex = 6 + dimensions.length;
-  const totalIndex = fiveDimIndex + 3;
 
   for (const [track, group] of groups) {
     const sorted = [...group].sort((a, b) => {
@@ -287,24 +268,6 @@ export function exportTrackedXlsx(
       rows.map((row, i) => row.concat(decisionLabel(sorted[i].decision))),
     );
     const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
-
-    const fiveCol = colLetter(fiveDimIndex);
-    const totalCol = colLetter(totalIndex);
-    for (let i = 0; i < sorted.length; i += 1) {
-      const excelRow = i + 2;
-      const report = sorted[i].report;
-      const cached: Record<string, number> = {
-        [fiveCol]: Math.round(report?.fiveDimScore ?? 0),
-        [totalCol]: Math.round(report?.total ?? 0),
-      };
-      for (const col of [fiveCol, totalCol]) {
-        const addr = `${col}${excelRow}`;
-        const cell = sheet[addr];
-        if (cell && typeof cell.v === "string" && cell.v.startsWith("=")) {
-          sheet[addr] = { t: "n", f: cell.v.slice(1), v: cached[col] };
-        }
-      }
-    }
 
     XLSX.utils.book_append_sheet(workbook, sheet, uniqueSheetName(track, usedNames));
   }
@@ -322,17 +285,6 @@ function uniqueSheetName(raw: string, used: Set<string>): string {
   }
   used.add(name);
   return name;
-}
-
-function colLetter(index: number): string {
-  let n = index + 1;
-  let s = "";
-  while (n > 0) {
-    const m = (n - 1) % 26;
-    s = String.fromCharCode(65 + m) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s;
 }
 
 function statusLabel(status: BatchItemResult["status"]): string {
