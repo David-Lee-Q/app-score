@@ -125,11 +125,11 @@ export function computeUsageScores(items: UsageScoreInput[]): Map<string, number
 
   for (const item of items) {
     const rNorm =
-      rMax === rMin ? 100 : ((item.rounds - rMin) / (rMax - rMin)) * 100;
+      rMax === rMin ? 100 : 1 + ((item.rounds - rMin) / (rMax - rMin)) * 99;
     const dNorm =
-      dMax === dMin ? 100 : ((item.activeDays - dMin) / (dMax - dMin)) * 100;
+      dMax === dMin ? 100 : 1 + ((item.activeDays - dMin) / (dMax - dMin)) * 99;
     const score = Math.round((rNorm + dNorm) / 2);
-    scores.set(item.key, Math.max(0, Math.min(100, score)));
+    scores.set(item.key, Math.max(1, Math.min(100, score)));
   }
 
   return scores;

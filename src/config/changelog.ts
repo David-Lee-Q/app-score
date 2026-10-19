@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.3";
+export const APP_VERSION = "v0.11.4";
 
 export interface ChangelogEntry {
   version: string;
@@ -8,10 +8,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "v0.11.3",
+    version: "v0.11.4",
     date: "2026-10-19",
     changes: [
       "「对话轮次」「活跃天数」支持在评分历史中手动修改，人工改动的数值标红；重新上传补对话数据后恢复为自动数据（取消标红）",
+    ],
+  },
+  {
+    version: "v0.11.3",
+    date: "2026-10-19",
+    changes: [
+      "「补深度分」归一化赋分区间由 0~100 调整为 1~100：对话轮次、活跃天数两项 min-max 归一化后最低 1 分、最高 100 分，避免最低项得 0 分",
     ],
   },
   {
