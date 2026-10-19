@@ -5,6 +5,9 @@ import { TRACKS } from "@/config/tracks";
 import { decisionLabel, decisionWeight } from "@/config/decisions";
 
 export const TEMPLATE_HEADERS = [
+  "作品ID",
+  "姓名",
+  "手机号",
   "应用名称（选填）",
   "赛道",
   "赛题",
@@ -14,6 +17,9 @@ export const TEMPLATE_HEADERS = [
 ] as const;
 
 const EXAMPLE_ROW: ApplicationRow = {
+  workId: "A1001",
+  personName: "张三",
+  phone: "13800000000",
   name: "示例应用",
   track: TRACKS[0],
   topic: BUILT_IN_TOPICS[0],
@@ -25,6 +31,9 @@ const EXAMPLE_ROW: ApplicationRow = {
 export function downloadTemplate() {
   const ws = XLSX.utils.aoa_to_sheet([[...TEMPLATE_HEADERS]]);
   ws["!cols"] = [
+    { wch: 16 },
+    { wch: 12 },
+    { wch: 16 },
     { wch: 18 },
     { wch: 12 },
     { wch: 34 },
@@ -39,6 +48,9 @@ export function downloadTemplate() {
   const exampleSheet = XLSX.utils.aoa_to_sheet([
     [...TEMPLATE_HEADERS],
     [
+      EXAMPLE_ROW.workId,
+      EXAMPLE_ROW.personName,
+      EXAMPLE_ROW.phone,
       EXAMPLE_ROW.name,
       EXAMPLE_ROW.track,
       EXAMPLE_ROW.topic,
@@ -103,6 +115,9 @@ export async function parseApplicationsFile(file: File): Promise<ApplicationRow[
     const openlabUrl = pick(raw, ["OpenLab文章链接", "OpenLab链接", "文章链接", "openlab"]);
     const repoUrl = pick(raw, ["开源代码仓", "代码仓", "代码仓库", "仓库", "repo", "git"]);
     const name = pick(raw, ["应用名称（选填）", "应用名称", "应用名", "名称", "name"]);
+    const workId = pick(raw, ["作品ID", "作品id", "作品 ID", "作品编号", "workId", "workid"]);
+    const personName = pick(raw, ["姓名", "联系人", "负责人", "personName", "owner"]);
+    const phone = pick(raw, ["手机号", "手机号码", "联系电话", "联系方式", "phone", "mobile"]);
 
     if (name === "示例应用") continue;
 
@@ -116,6 +131,9 @@ export async function parseApplicationsFile(file: File): Promise<ApplicationRow[
       cosmocodeUrl,
       openlabUrl,
       repoUrl,
+      workId,
+      personName,
+      phone,
     });
   }
 
@@ -143,6 +161,9 @@ export function exportSingleResultCsv(
     cosmocodeUrl: string;
     openlabUrl: string;
     repoUrl: string;
+    workId?: string;
+    personName?: string;
+    phone?: string;
   },
   report: ScoreReport,
   dimensions: ScoreDimension[],
@@ -163,6 +184,9 @@ function buildResultRows(
   dimensions: ScoreDimension[],
 ): { header: string[]; rows: string[][] } {
   const header = [
+    "作品ID",
+    "姓名",
+    "手机号",
     "应用名称",
     "赛道",
     "赛题",
@@ -208,6 +232,9 @@ function buildResultRows(
     const totalCell = item.report ? String(Math.round(item.report.total)) : "";
 
     return [
+      item.workId ?? "",
+      item.personName ?? "",
+      item.phone ?? "",
       item.name,
       item.track,
       item.topic,

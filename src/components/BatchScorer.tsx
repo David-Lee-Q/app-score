@@ -48,7 +48,14 @@ function buildBatchHistory(
     }`,
     calibrated: items.some((i) => i.report?.calibrated),
     dimensions: SCORE_DIMENSIONS,
-    batch: { items, fileName },
+    batch: {
+      items,
+      fileName,
+      originalOrder: items
+        .map((i) => i.id)
+        .filter((id): id is string => Boolean(id)),
+      originalOrderAt: new Date().toISOString(),
+    },
   };
 }
 
@@ -133,6 +140,9 @@ const PREVIEW_COLUMNS: {
   nowrap: boolean;
   icon: IconName;
 }[] = [
+  { key: "workId", label: "作品ID", width: 100, nowrap: true, icon: "id" },
+  { key: "personName", label: "姓名", width: 90, nowrap: true, icon: "user" },
+  { key: "phone", label: "手机号", width: 130, nowrap: true, icon: "phone" },
   { key: "name", label: "应用名称（选填）", width: 150, nowrap: true, icon: "app" },
   { key: "track", label: "赛道", width: 100, nowrap: true, icon: "flag" },
   { key: "topic", label: "赛题", width: 220, nowrap: true, icon: "target" },
@@ -682,6 +692,12 @@ export default function BatchScorer() {
                       switch (key) {
                         case "name":
                           return row.name;
+                        case "workId":
+                          return row.workId ?? "";
+                        case "personName":
+                          return row.personName ?? "";
+                        case "phone":
+                          return row.phone ?? "";
                         case "track":
                           return row.track;
                         case "topic":

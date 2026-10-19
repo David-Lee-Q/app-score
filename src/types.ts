@@ -66,6 +66,9 @@ export interface ScoreRequest extends ApplicationInput {
 
 export interface ApplicationRow extends ApplicationInput {
   name: string;
+  workId?: string;
+  personName?: string;
+  phone?: string;
 }
 
 export type BatchItemStatus = "pending" | "scoring" | "done" | "error";
@@ -81,6 +84,9 @@ export interface BatchItemResult extends ApplicationRow {
   comment?: string;
   usageRounds?: number;
   usageActiveDays?: number;
+  nameOriginal?: string | null;
+  personNameOriginal?: string | null;
+  phoneOriginal?: string | null;
 }
 
 export interface ScoreMeta {
@@ -100,6 +106,13 @@ export interface BatchSupplement {
   scoredAt?: string;
 }
 
+export interface BatchInfoSupplement {
+  fileName: string;
+  uploadedAt: string;
+  matchedCount: number;
+  totalCount: number;
+}
+
 export interface HistoryEntry {
   id: string;
   kind: "single" | "batch";
@@ -117,5 +130,6 @@ export interface HistoryEntry {
     originalOrder?: string[];
     originalOrderAt?: string;
     supplement?: BatchSupplement;
+    infoSupplement?: BatchInfoSupplement;
   };
 }

@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.0";
+export const APP_VERSION = "v0.11.1";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.1",
+    date: "2026-10-19",
+    changes: [
+      "批量模板与结果导出新增「作品ID」「姓名」「手机号」三列，导入时自动解析（兼容作品编号/联系人/联系电话等别名）",
+      "评分历史应用行新增「作品ID」「姓名」「手机号」三列，支持点击表头排序",
+      "新增「补作品信息」：上传作品名单（含「COSMO Code应用链接」「作品ID」「姓名」「手机号」列），按应用链接逐行匹配并回填这三个字段，支持表头在首行或标题行之后",
+      "「姓名」「手机号」「应用名称」支持在评分历史中手动修改，人工改动的字段标红（与应用链接刷新、补作品信息自动填充的值区分）",
+      "新增「作品信息模板」下载",
+      "「恢复原始顺序」按导入模板时的原始行顺序还原展示，仅调整行序，人工修改（分值、加分、评审状态、人工评价、名称等）完整保留",
+    ],
+  },
   {
     version: "v0.11.0",
     date: "2026-10-17",

@@ -20,6 +20,7 @@ import {
   parseUsageFile,
   type UsageRow,
 } from "@/utils/usage";
+import { parseRosterFile, downloadRosterTemplate, type RosterRow } from "@/utils/roster";
 import { sortBy, toggleSort, type SortState, type SortValue } from "@/utils/sort";
 import { REVIEW_DECISIONS } from "@/config/decisions";
 import { generateRankingPoster } from "@/utils/poster";
@@ -197,8 +198,108 @@ function EditableScoreCell({
   );
 }
 
+function isTextEdited(value: string | undefined, original: string | null | undefined) {
+  return original !== undefined && original !== null && (value ?? "") !== original;
+}
+
+function EditableTextCell({
+  value,
+  edited,
+  placeholder = "—",
+  onCommit,
+  className = "",
+  idleClass = "text-slate-600",
+}: {
+  value: string;
+  edited: boolean;
+  placeholder?: string;
+  onCommit: (value: string) => void;
+  className?: string;
+  idleClass?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  function start() {
+    setDraft(value || "");
+    setEditing(true);
+  }
+
+  function confirm() {
+    setEditing(false);
+    onCommit(draft.trim());
+  }
+
+  function cancel() {
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onBlur={cancel}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              confirm();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          className="w-32 min-w-[6rem] rounded-md border border-indigo-300 px-1.5 py-1 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none"
+        />
+        <button
+          type="button"
+          title="确认修改"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={confirm}
+          className="rounded p-0.5 text-emerald-600 transition hover:bg-emerald-50"
+        >
+          <Icon name="check" className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          title="取消"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={cancel}
+          className="rounded p-0.5 text-slate-400 transition hover:bg-slate-100"
+        >
+          <Icon name="close" className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={start}
+      title={edited ? "已人工修改，点击可再次修改" : "点击修改"}
+      className={`block w-full truncate rounded-md px-1 py-0.5 text-left text-xs transition hover:bg-slate-100 ${
+        edited ? "text-rose-600" : idleClass
+      } ${className}`}
+    >
+      {value ? (
+        value
+      ) : (
+        <span className="text-slate-300">{placeholder}</span>
+      )}
+    </button>
+  );
+}
+
 function batchResultSortValue(item: BatchItemResult, key: string): SortValue {
   if (key === "name") return item.name || "";
+  if (key === "workId") return item.workId || "";
+  if (key === "personName") return item.personName || "";
+  if (key === "phone") return item.phone || "";
   const report = item.report;
   if (!report) return null;
   switch (key) {
@@ -225,6 +326,7 @@ function BatchTable({
   onScoreChange,
   onBonusChange,
   onCommentChange,
+  onTextChange,
   onRefreshName,
   refreshingNameId,
 }: {
@@ -237,6 +339,11 @@ function BatchTable({
     value: number,
   ) => void;
   onCommentChange: (itemId: string, comment: string) => void;
+  onTextChange: (
+    itemId: string,
+    field: "name" | "personName" | "phone",
+    value: string,
+  ) => void;
   onRefreshName: (itemId: string) => void;
   refreshingNameId: string | null;
 }) {
@@ -254,7 +361,11 @@ function BatchTable({
     setSort((prev) => toggleSort(prev, key));
   }
 
-  const colCount = dimensions.length + (showTrackTopic ? 16 : 14);
+  useEffect(() => {
+    setSort(null);
+  }, [sortByTopic]);
+
+  const colCount = dimensions.length + (showTrackTopic ? 19 : 17);
 
   const pinCols: { key: string; width: number }[] = [{ key: "name", width: 200 }];
   if (showTrackTopic) pinCols.push({ key: "track", width: 76 }, { key: "topic", width: 200 });
@@ -278,6 +389,20 @@ function BatchTable({
     };
   }
 
+  const originalOrder = entry.batch?.originalOrder ?? [];
+  const originalIndex = new Map(originalOrder.map((id, i) => [id, i]));
+  function inOriginalOrder(rows: BatchItemResult[]): BatchItemResult[] {
+    if (originalOrder.length === 0) return rows;
+    return [...rows].sort((a, b) => {
+      const ia = a.id ? originalIndex.get(a.id) : undefined;
+      const ib = b.id ? originalIndex.get(b.id) : undefined;
+      if (ia === undefined && ib === undefined) return 0;
+      if (ia === undefined) return 1;
+      if (ib === undefined) return -1;
+      return ia - ib;
+    });
+  }
+
   const groups: { key: string; label: string; rows: BatchItemResult[] }[] = [];
   if (sortByTopic) {
     const map = new Map<string, BatchItemResult[]>();
@@ -287,9 +412,11 @@ function BatchTable({
       if (list) list.push(item);
       else map.set(key, [item]);
     }
-    for (const [key, rows] of map) groups.push({ key, label: key, rows });
+    for (const [key, rows] of map) {
+      groups.push({ key, label: key, rows: inOriginalOrder(rows) });
+    }
   } else {
-    groups.push({ key: "__all__", label: "", rows: items });
+    groups.push({ key: "__all__", label: "", rows: inOriginalOrder(items) });
   }
 
   function renderDetail(item: BatchItemResult) {
@@ -428,6 +555,27 @@ function BatchTable({
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
               <SortableHeader
+                label="作品ID"
+                sortKey="workId"
+                sort={sort}
+                onSort={handleSort}
+                className="px-3 py-2 font-medium"
+              />
+              <SortableHeader
+                label="姓名"
+                sortKey="personName"
+                sort={sort}
+                onSort={handleSort}
+                className="px-3 py-2 font-medium"
+              />
+              <SortableHeader
+                label="手机号"
+                sortKey="phone"
+                sort={sort}
+                onSort={handleSort}
+                className="px-3 py-2 font-medium"
+              />
+              <SortableHeader
                 label="应用名称"
                 sortKey="name"
                 sort={sort}
@@ -547,31 +695,69 @@ function BatchTable({
                 <Fragment key={rowKey}>
                   <tr className="text-slate-700">
                     <td
+                      className="px-3 py-2 text-xs text-slate-600"
+                      title={item.workId || undefined}
+                    >
+                      {item.workId ? (
+                        <span className="block truncate">{item.workId}</span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <EditableTextCell
+                        value={item.personName || ""}
+                        edited={isTextEdited(item.personName, item.personNameOriginal)}
+                        onCommit={(v) => {
+                          if (item.id) onTextChange(item.id, "personName", v);
+                        }}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <EditableTextCell
+                        value={item.phone || ""}
+                        edited={isTextEdited(item.phone, item.phoneOriginal)}
+                        onCommit={(v) => {
+                          if (item.id) onTextChange(item.id, "phone", v);
+                        }}
+                      />
+                    </td>
+                    <td
                       className="px-3 py-2"
                       style={pinStyle(0)}
                       title={
                         item.error
                           ? `${item.name || "—"}（报错：${item.error}）`
                           : item.cosmocodeUrl
-                            ? "双击名称可刷新获取"
+                            ? "点击可修改名称，点右侧刷新可重新获取"
                             : item.name || "—"
                       }
                     >
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <span
-                          onDoubleClick={() => {
-                            if (item.id && item.cosmocodeUrl) onRefreshName(item.id);
+                        <EditableTextCell
+                          value={item.name || ""}
+                          edited={isTextEdited(item.name, item.nameOriginal)}
+                          className="min-w-0 flex-1 font-medium"
+                          idleClass="text-slate-800"
+                          onCommit={(v) => {
+                            if (item.id) onTextChange(item.id, "name", v);
                           }}
-                          className={`min-w-0 flex-1 truncate font-medium text-slate-800 ${
-                            item.id && item.cosmocodeUrl ? "cursor-pointer" : ""
-                          }`}
-                        >
-                          {item.name || "—"}
-                        </span>
-                        {refreshingNameId === item.id && (
-                          <span className="shrink-0 animate-spin text-indigo-500">
-                            <Icon name="refresh" className="h-3.5 w-3.5" />
-                          </span>
+                        />
+                        {item.id && item.cosmocodeUrl && (
+                          <button
+                            type="button"
+                            title="根据应用链接刷新名称"
+                            disabled={refreshingNameId === item.id}
+                            onClick={() => onRefreshName(item.id as string)}
+                            className="shrink-0 rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-indigo-600 disabled:opacity-50"
+                          >
+                            <Icon
+                              name="refresh"
+                              className={`h-3.5 w-3.5 ${
+                                refreshingNameId === item.id ? "animate-spin text-indigo-500" : ""
+                              }`}
+                            />
+                          </button>
                         )}
                         {item.error && (
                           <span className="shrink-0 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-600">
@@ -805,6 +991,10 @@ export default function HistoryPanel() {
   const [usageProcessing, setUsageProcessing] = useState(false);
   const usageTargetRef = useRef<HistoryEntry | null>(null);
   const usageInputRef = useRef<HTMLInputElement>(null);
+  const [infoMessage, setInfoMessage] = useState("");
+  const [infoProcessing, setInfoProcessing] = useState(false);
+  const infoTargetRef = useRef<HistoryEntry | null>(null);
+  const infoInputRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(0);
 
   async function persist(task: () => Promise<void>) {
@@ -1081,6 +1271,69 @@ export default function HistoryPanel() {
     }
   }
 
+  async function handleTextChange(
+    entry: HistoryEntry,
+    itemId: string,
+    field: "name" | "personName" | "phone",
+    value: string,
+  ) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    const prevItems = entry.batch.items;
+    const current = prevItems.find((it) => it.id === itemId);
+    if (!current) return;
+
+    const patch: Partial<BatchItemResult> = {};
+    if (field === "name") {
+      const base =
+        current.nameOriginal !== undefined && current.nameOriginal !== null
+          ? current.nameOriginal
+          : current.name || "";
+      patch.name = value;
+      patch.nameOriginal = base;
+    } else if (field === "personName") {
+      const base =
+        current.personNameOriginal !== undefined && current.personNameOriginal !== null
+          ? current.personNameOriginal
+          : current.personName || "";
+      patch.personName = value;
+      patch.personNameOriginal = base;
+    } else {
+      const base =
+        current.phoneOriginal !== undefined && current.phoneOriginal !== null
+          ? current.phoneOriginal
+          : current.phone || "";
+      patch.phone = value;
+      patch.phoneOriginal = base;
+    }
+
+    const updated: BatchItemResult = { ...current, ...patch };
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.id === entry.id && e.batch
+          ? {
+              ...e,
+              batch: {
+                ...e.batch,
+                items: e.batch.items.map((it) => (it.id === itemId ? updated : it)),
+              },
+            }
+          : e,
+      ),
+    );
+    try {
+      await persist(() => patchHistoryItem(entry.id, itemId, patch));
+    } catch (err) {
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id && e.batch
+            ? { ...e, batch: { ...e.batch, items: prevItems } }
+            : e,
+        ),
+      );
+      setError(err instanceof Error ? err.message : "保存修改失败");
+    }
+  }
+
   async function handleRefreshName(entry: HistoryEntry, itemId: string) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const item = entry.batch.items.find((it) => it.id === itemId);
@@ -1099,7 +1352,7 @@ export default function HistoryPanel() {
         return;
       }
       const prevItems = entry.batch.items;
-      const updated: BatchItemResult = { ...item, name };
+      const updated: BatchItemResult = { ...item, name, nameOriginal: null };
       setEntries((prev) =>
         prev.map((e) =>
           e.id === entry.id && e.batch
@@ -1114,7 +1367,9 @@ export default function HistoryPanel() {
         ),
       );
       try {
-        await persist(() => patchHistoryItem(entry.id, itemId, { name }));
+        await persist(() =>
+          patchHistoryItem(entry.id, itemId, { name, nameOriginal: null }),
+        );
       } catch (err) {
         setEntries((prev) =>
           prev.map((e) =>
@@ -1138,6 +1393,133 @@ export default function HistoryPanel() {
     setError("");
     usageTargetRef.current = entry;
     usageInputRef.current?.click();
+  }
+
+  function openInfoPicker(entry: HistoryEntry) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    setInfoMessage("");
+    setError("");
+    infoTargetRef.current = entry;
+    infoInputRef.current?.click();
+  }
+
+  function onInfoInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const target = infoTargetRef.current;
+    e.target.value = "";
+    infoTargetRef.current = null;
+    if (file && target) void handleInfoUpload(target, file);
+  }
+
+  async function handleInfoUpload(entry: HistoryEntry, file: File) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    setInfoMessage("");
+    setError("");
+    setInfoProcessing(true);
+    try {
+      const rows = await parseRosterFile(file);
+      const byKey = new Map<string, RosterRow>();
+      for (const row of rows) if (row.key) byKey.set(row.key, row);
+
+      const items = entry.batch.items;
+      const matchedKeys = new Set<string>();
+      const matched: {
+        item: BatchItemResult;
+        workId: string;
+        personName: string;
+        phone: string;
+      }[] = [];
+
+      items.forEach((item) => {
+        const key = normalizeMatchKey(item.cosmocodeUrl || "");
+        if (!key) return;
+        const row = byKey.get(key);
+        if (!row) return;
+        matchedKeys.add(key);
+        matched.push({
+          item,
+          workId: row.workId,
+          personName: row.personName,
+          phone: row.phone,
+        });
+      });
+
+      const uploadedExtra = rows
+        .filter((row) => row.key && !matchedKeys.has(row.key))
+        .map((row) => row.rawKey);
+
+      if (matched.length === 0) {
+        setInfoMessage(
+          "作品名单未匹配到本记录中的应用，请确认「COSMO Code应用链接」是否与记录一致。",
+        );
+        return;
+      }
+
+      const updatedItems = items.map((item) => {
+        const m = matched.find((x) => x.item === item);
+        if (!m) return item;
+        const next = { ...item };
+        if (m.workId) next.workId = m.workId;
+        if (m.personName) {
+          next.personName = m.personName;
+          next.personNameOriginal = null;
+        }
+        if (m.phone) {
+          next.phone = m.phone;
+          next.phoneOriginal = null;
+        }
+        return next;
+      });
+
+      const matchedCount = updatedItems.filter(
+        (it) => it.workId || it.personName || it.phone,
+      ).length;
+
+      const infoSupplement = {
+        fileName: file.name,
+        uploadedAt: new Date().toISOString(),
+        matchedCount,
+        totalCount: items.length,
+      };
+
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id && e.batch
+            ? { ...e, batch: { ...e.batch, items: updatedItems, infoSupplement } }
+            : e,
+        ),
+      );
+
+      const notes: string[] = [
+        `已补作品信息：匹配 ${matched.length} 条（累计 ${matchedCount}/${items.length}）。`,
+      ];
+      if (uploadedExtra.length) {
+        notes.push(`文件中有 ${uploadedExtra.length} 条未匹配到本记录。`);
+      }
+      setInfoMessage(notes.join(""));
+
+      await persist(async () => {
+        for (let i = 0; i < items.length; i += 1) {
+          const original = items[i];
+          const updated = updatedItems[i];
+          if (updated === original || !original.id) continue;
+          await patchHistoryItem(entry.id, original.id, {
+            workId: updated.workId ?? "",
+            personName: updated.personName ?? "",
+            personNameOriginal: updated.personNameOriginal ?? null,
+            phone: updated.phone ?? "",
+            phoneOriginal: updated.phoneOriginal ?? null,
+          });
+        }
+        await patchHistoryEntry(entry.id, { batch: { infoSupplement } });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "补作品信息失败");
+      setInfoMessage("");
+      void load();
+    } finally {
+      setInfoProcessing(false);
+    }
   }
 
   function onUsageInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1458,6 +1840,15 @@ export default function HistoryPanel() {
           </Button>
           <Button
             type="button"
+            variant="soft"
+            size="sm"
+            onClick={downloadRosterTemplate}
+          >
+            <Icon name="download" className="h-3.5 w-3.5" />
+            作品信息模板
+          </Button>
+          <Button
+            type="button"
             variant="secondary"
             size="sm"
             onClick={() => void load()}
@@ -1475,6 +1866,14 @@ export default function HistoryPanel() {
         onChange={onUsageInputChange}
       />
 
+      <input
+        ref={infoInputRef}
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={onInfoInputChange}
+      />
+
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-600">
           {error}
@@ -1484,6 +1883,12 @@ export default function HistoryPanel() {
       {usageMessage && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm text-indigo-700">
           {usageMessage}
+        </div>
+      )}
+
+      {infoMessage && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
+          {infoMessage}
         </div>
       )}
 
@@ -1520,6 +1925,9 @@ export default function HistoryPanel() {
                       {entry.subtitle ? `${entry.subtitle} · ` : ""}
                       {formatTime(entry.createdAt)}
                       {entry.calibrated ? " · 已全局校准" : ""}
+                      {entry.batch?.infoSupplement
+                        ? ` · 已补作品信息（${entry.batch.infoSupplement.matchedCount}/${entry.batch.infoSupplement.totalCount}）`
+                        : ""}
                       {entry.batch?.supplement
                         ? entry.batch.supplement.scoredAt
                           ? ` · 已补对话（${entry.batch.supplement.matchedCount}/${entry.batch.supplement.totalCount}）· 深度分已生成`
@@ -1596,6 +2004,19 @@ export default function HistoryPanel() {
                           type="button"
                           variant="soft"
                           size="xs"
+                          disabled={infoProcessing}
+                          onClick={() => openInfoPicker(entry)}
+                        >
+                          <Icon name="id" className="h-3.5 w-3.5" />
+                          {infoProcessing ? "处理中…" : "补作品信息"}
+                        </Button>
+                      )}
+                    {entry.kind === "batch" &&
+                      (entry.batch?.items?.length ?? 0) > 0 && (
+                        <Button
+                          type="button"
+                          variant="soft"
+                          size="xs"
                           disabled={usageProcessing}
                           onClick={() => openUsagePicker(entry)}
                         >
@@ -1654,6 +2075,9 @@ export default function HistoryPanel() {
                         }
                         onCommentChange={(itemId, comment) =>
                           void handleCommentChange(entry, itemId, comment)
+                        }
+                        onTextChange={(itemId, field, value) =>
+                          void handleTextChange(entry, itemId, field, value)
                         }
                         onRefreshName={(itemId) =>
                           void handleRefreshName(entry, itemId)

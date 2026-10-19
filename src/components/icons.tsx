@@ -16,7 +16,10 @@ export type IconName =
   | "alert"
   | "check"
   | "close"
-  | "refresh";
+  | "refresh"
+  | "id"
+  | "user"
+  | "phone";
 
 const PATHS: Record<IconName, ReactNode> = {
   app: (
@@ -24,6 +27,26 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="3" y="3" width="18" height="18" rx="3" />
       <path d="M8 8h8" />
       <path d="M8 12h5" />
+    </>
+  ),
+  id: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="3" />
+      <circle cx="8.5" cy="11" r="2" />
+      <path d="M13.5 10h4" />
+      <path d="M13.5 14h4" />
+      <path d="M5.5 16c.6-1.4 1.6-2 3-2s2.4.6 3 2" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
+    </>
+  ),
+  phone: (
+    <>
+      <path d="M6 3h3l1.5 4.5-2 1.5a12 12 0 0 0 5 5l1.5-2L20 15v3a2 2 0 0 1-2 2A15 15 0 0 1 4 5a2 2 0 0 1 2-2z" />
     </>
   ),
   flag: (
