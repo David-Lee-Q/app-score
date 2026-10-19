@@ -1731,7 +1731,7 @@ export default function HistoryPanel() {
                 score,
                 edited: false,
                 originalScore: undefined,
-                reason: `补对话数据自动赋分：对话轮次 ${t.rounds}、活跃天数 ${t.activeDays}（全批归一化，权重各 0.5）。`,
+                reason: `补对话数据自动赋分：对话轮次 ${t.rounds}、活跃天数 ${t.activeDays}（全批归一化至 1~100，权重各 0.5）。`,
               }
             : d,
         );

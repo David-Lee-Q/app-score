@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.2";
+export const APP_VERSION = "v0.11.3";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.3",
+    date: "2026-10-19",
+    changes: [
+      "「补深度分」归一化赋分区间由 0~100 调整为 1~100：对话轮次、活跃天数两项 min-max 归一化后最低 1 分、最高 100 分，避免最低项得 0 分",
+    ],
+  },
   {
     version: "v0.11.2",
     date: "2026-10-19",
