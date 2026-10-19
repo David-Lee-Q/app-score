@@ -88,6 +88,7 @@ function EditableScoreCell({
   max = 100,
   prefix = "",
   idleClass = "text-slate-700",
+  placeholder = "待评",
 }: {
   value: number | null;
   edited: boolean;
@@ -95,6 +96,7 @@ function EditableScoreCell({
   max?: number;
   prefix?: string;
   idleClass?: string;
+  placeholder?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -193,13 +195,20 @@ function EditableScoreCell({
             : idleClass
       }`}
     >
-      {value === null ? "待评" : `${prefix}${value}`}
+      {value === null ? placeholder : `${prefix}${value}`}
     </button>
   );
 }
 
 function isTextEdited(value: string | undefined, original: string | null | undefined) {
   return original !== undefined && original !== null && (value ?? "") !== original;
+}
+
+function isNumberEdited(
+  value: number | null | undefined,
+  original: number | null | undefined,
+) {
+  return original !== undefined && original !== null && (value ?? null) !== original;
 }
 
 function EditableTextCell({
@@ -329,6 +338,7 @@ function BatchTable({
   onBonusChange,
   onCommentChange,
   onTextChange,
+  onUsageNumberChange,
   onRefreshName,
   refreshingNameId,
 }: {
@@ -345,6 +355,11 @@ function BatchTable({
     itemId: string,
     field: "name" | "personName" | "phone",
     value: string,
+  ) => void;
+  onUsageNumberChange: (
+    itemId: string,
+    field: "usageRounds" | "usageActiveDays",
+    value: number | null,
   ) => void;
   onRefreshName: (itemId: string) => void;
   refreshingNameId: string | null;
@@ -796,19 +811,36 @@ function BatchTable({
                     <td className="px-2 py-2" style={pinStyle(linkBase + 2)}>
                       <LinkCell url={item.repoUrl} />
                     </td>
-                    <td className="px-3 py-2 text-center text-xs text-slate-600">
-                      {item.usageRounds === undefined ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        item.usageRounds
-                      )}
+                    <td className="px-3 py-2 text-center">
+                      <EditableScoreCell
+                        value={item.usageRounds ?? null}
+                        edited={isNumberEdited(
+                          item.usageRounds,
+                          item.usageRoundsOriginal,
+                        )}
+                        max={100000}
+                        placeholder="—"
+                        idleClass="text-slate-600"
+                        onCommit={(v) => {
+                          if (item.id) onUsageNumberChange(item.id, "usageRounds", v);
+                        }}
+                      />
                     </td>
-                    <td className="px-3 py-2 text-center text-xs text-slate-600">
-                      {item.usageActiveDays === undefined ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        item.usageActiveDays
-                      )}
+                    <td className="px-3 py-2 text-center">
+                      <EditableScoreCell
+                        value={item.usageActiveDays ?? null}
+                        edited={isNumberEdited(
+                          item.usageActiveDays,
+                          item.usageActiveDaysOriginal,
+                        )}
+                        max={100000}
+                        placeholder="—"
+                        idleClass="text-slate-600"
+                        onCommit={(v) => {
+                          if (item.id)
+                            onUsageNumberChange(item.id, "usageActiveDays", v);
+                        }}
+                      />
                     </td>
                     {dimensions.map((d) => {
                       const cell = dimByKey.get(d.key);
@@ -1357,6 +1389,66 @@ export default function HistoryPanel() {
     }
   }
 
+  async function handleUsageNumberChange(
+    entry: HistoryEntry,
+    itemId: string,
+    field: "usageRounds" | "usageActiveDays",
+    value: number | null,
+  ) {
+    if (entry.kind !== "batch" || !entry.batch) return;
+    const prevItems = entry.batch.items;
+    const current = prevItems.find((it) => it.id === itemId);
+    if (!current) return;
+
+    const next: BatchItemResult = { ...current };
+    let patch: Partial<BatchItemResult>;
+    if (field === "usageRounds") {
+      const base =
+        current.usageRoundsOriginal !== undefined &&
+        current.usageRoundsOriginal !== null
+          ? current.usageRoundsOriginal
+          : current.usageRounds ?? null;
+      next.usageRounds = value;
+      next.usageRoundsOriginal = base;
+      patch = { usageRounds: value, usageRoundsOriginal: base ?? null };
+    } else {
+      const base =
+        current.usageActiveDaysOriginal !== undefined &&
+        current.usageActiveDaysOriginal !== null
+          ? current.usageActiveDaysOriginal
+          : current.usageActiveDays ?? null;
+      next.usageActiveDays = value;
+      next.usageActiveDaysOriginal = base;
+      patch = { usageActiveDays: value, usageActiveDaysOriginal: base ?? null };
+    }
+
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.id === entry.id && e.batch
+          ? {
+              ...e,
+              batch: {
+                ...e.batch,
+                items: e.batch.items.map((it) => (it.id === itemId ? next : it)),
+              },
+            }
+          : e,
+      ),
+    );
+    try {
+      await persist(() => patchHistoryItem(entry.id, itemId, patch));
+    } catch (err) {
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id && e.batch
+            ? { ...e, batch: { ...e.batch, items: prevItems } }
+            : e,
+        ),
+      );
+      setError(err instanceof Error ? err.message : "保存修改失败");
+    }
+  }
+
   async function handleRefreshName(entry: HistoryEntry, itemId: string) {
     if (entry.kind !== "batch" || !entry.batch) return;
     const item = entry.batch.items.find((it) => it.id === itemId);
@@ -1595,8 +1687,8 @@ export default function HistoryPanel() {
 
       const updatedItems = items.map((item) => {
         const m = matched.find((x) => x.item === item);
-        const rounds = m ? m.rounds : item.usageRounds;
-        const activeDays = m ? m.activeDays : item.usageActiveDays;
+        const rounds = m ? m.rounds : item.usageRounds ?? undefined;
+        const activeDays = m ? m.activeDays : item.usageActiveDays ?? undefined;
         const hasData = rounds !== undefined && activeDays !== undefined;
         const needsReset =
           hasData &&
@@ -1604,8 +1696,16 @@ export default function HistoryPanel() {
             (d) => d.key === "cosmoUsage" && d.score !== null,
           );
         if (!m && !needsReset) return item;
+        const clearedRoundsOriginal = m ? null : item.usageRoundsOriginal;
+        const clearedActiveDaysOriginal = m ? null : item.usageActiveDaysOriginal;
         if (!item.report) {
-          return { ...item, usageRounds: rounds, usageActiveDays: activeDays };
+          return {
+            ...item,
+            usageRounds: rounds,
+            usageActiveDays: activeDays,
+            usageRoundsOriginal: clearedRoundsOriginal,
+            usageActiveDaysOriginal: clearedActiveDaysOriginal,
+          };
         }
         const dimensions = item.report.dimensions.map((d) =>
           d.key === "cosmoUsage"
@@ -1628,11 +1728,18 @@ export default function HistoryPanel() {
             item.report.openSourceBonus +
             item.report.directedTopicBonus,
         };
-        return { ...item, report, usageRounds: rounds, usageActiveDays: activeDays };
+        return {
+          ...item,
+          report,
+          usageRounds: rounds,
+          usageActiveDays: activeDays,
+          usageRoundsOriginal: clearedRoundsOriginal,
+          usageActiveDaysOriginal: clearedActiveDaysOriginal,
+        };
       });
 
       const matchedCount = updatedItems.filter(
-        (it) => it.usageRounds !== undefined && it.usageActiveDays !== undefined,
+        (it) => it.usageRounds != null && it.usageActiveDays != null,
       ).length;
 
       const supplement = {
@@ -1667,6 +1774,8 @@ export default function HistoryPanel() {
           await patchHistoryItem(entry.id, original.id, {
             usageRounds: updated.usageRounds,
             usageActiveDays: updated.usageActiveDays,
+            usageRoundsOriginal: updated.usageRoundsOriginal ?? null,
+            usageActiveDaysOriginal: updated.usageActiveDaysOriginal ?? null,
             ...(updated.report ? { report: updated.report } : {}),
           });
         }
@@ -1692,8 +1801,7 @@ export default function HistoryPanel() {
     }[] = [];
     items.forEach((item, index) => {
       if (!item.report) return;
-      if (item.usageRounds === undefined || item.usageActiveDays === undefined)
-        return;
+      if (item.usageRounds == null || item.usageActiveDays == null) return;
       targets.push({
         index,
         item,
@@ -2101,6 +2209,9 @@ export default function HistoryPanel() {
                         }
                         onTextChange={(itemId, field, value) =>
                           void handleTextChange(entry, itemId, field, value)
+                        }
+                        onUsageNumberChange={(itemId, field, value) =>
+                          void handleUsageNumberChange(entry, itemId, field, value)
                         }
                         onRefreshName={(itemId) =>
                           void handleRefreshName(entry, itemId)

@@ -82,8 +82,10 @@ export interface BatchItemResult extends ApplicationRow {
   error?: string;
   decision?: ReviewDecision;
   comment?: string;
-  usageRounds?: number;
-  usageActiveDays?: number;
+  usageRounds?: number | null;
+  usageActiveDays?: number | null;
+  usageRoundsOriginal?: number | null;
+  usageActiveDaysOriginal?: number | null;
   nameOriginal?: string | null;
   personNameOriginal?: string | null;
   phoneOriginal?: string | null;

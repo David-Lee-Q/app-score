@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.2";
+export const APP_VERSION = "v0.11.3";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.3",
+    date: "2026-10-19",
+    changes: [
+      "「对话轮次」「活跃天数」支持在评分历史中手动修改，人工改动的数值标红；重新上传补对话数据后恢复为自动数据（取消标红）",
+    ],
+  },
   {
     version: "v0.11.2",
     date: "2026-10-19",
