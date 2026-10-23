@@ -331,6 +331,52 @@ function batchResultSortValue(item: BatchItemResult, key: string): SortValue {
 
 type DecisionFilter = ReviewDecision | "pending";
 
+function collectSearchText(value: unknown, out: string[]): void {
+  if (value === null || value === undefined) return;
+  if (typeof value === "string") {
+    if (value) out.push(value);
+    return;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    out.push(String(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) collectSearchText(child, out);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      collectSearchText(child, out);
+    }
+  }
+}
+
+function parseSearchTokens(query: string): string[] {
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function matchesSearch(value: unknown, tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+  const parts: string[] = [];
+  collectSearchText(value, parts);
+  if (parts.length === 0) return false;
+  const haystack = parts.join(" ").toLowerCase();
+  return tokens.every((token) => haystack.includes(token));
+}
+
+function entryMatchesSearch(entry: HistoryEntry, tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+  if (entry.kind === "batch") {
+    const batchItems = entry.batch?.items ?? [];
+    return batchItems.some((item) => matchesSearch(item, tokens));
+  }
+  return matchesSearch(
+    { title: entry.title, subtitle: entry.subtitle, single: entry.single },
+    tokens,
+  );
+}
+
 function BatchTable({
   entry,
   onDecision,
@@ -341,6 +387,7 @@ function BatchTable({
   onUsageNumberChange,
   onRefreshName,
   refreshingNameId,
+  query,
 }: {
   entry: HistoryEntry;
   onDecision: (itemId: string, decision: ReviewDecision | null) => void;
@@ -363,8 +410,14 @@ function BatchTable({
   ) => void;
   onRefreshName: (itemId: string) => void;
   refreshingNameId: string | null;
+  query: string;
 }) {
-  const items = entry.batch?.items ?? [];
+  const allItems = entry.batch?.items ?? [];
+  const queryTokens = parseSearchTokens(query);
+  const items =
+    queryTokens.length === 0
+      ? allItems
+      : allItems.filter((item) => matchesSearch(item, queryTokens));
   const dimensions = entry.dimensions;
   const sortByTopic = !!entry.batch?.sortByTopic;
   const showTrackTopic = !sortByTopic;
@@ -1022,6 +1075,7 @@ export default function HistoryPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<HistoryEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [refreshingNameId, setRefreshingNameId] = useState<string | null>(null);
@@ -1949,6 +2003,11 @@ export default function HistoryPanel() {
         new Date(e.createdAt).getTime(),
     );
   const deleteStrong = deleteSameName.length > 0 && deleteIsLatest;
+  const searchTokens = parseSearchTokens(query);
+  const visibleEntries =
+    searchTokens.length === 0
+      ? entries
+      : entries.filter((entry) => entryMatchesSearch(entry, searchTokens));
 
   return (
     <section className="space-y-4">
@@ -1959,7 +2018,28 @@ export default function HistoryPanel() {
             保存每次单个与批量评分结果，支持查看与下载，最多保留最近 100 条
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-slate-400">
+              <Icon name="search" className="h-3.5 w-3.5" />
+            </span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索任意字段，如姓名/手机号/作品ID"
+              className="w-60 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-8 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="清除搜索"
+                className="absolute inset-y-0 right-2 flex items-center text-slate-400 transition hover:text-slate-600"
+              >
+                <Icon name="close" className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <Button
             type="button"
             variant="soft"
@@ -2029,9 +2109,13 @@ export default function HistoryPanel() {
         <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-400">
           暂无评分历史，完成评分后自动留存
         </p>
+      ) : visibleEntries.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-400">
+          未找到与「{query.trim()}」匹配的记录
+        </p>
       ) : (
         <ul className="space-y-3">
-          {entries.map((entry) => {
+          {visibleEntries.map((entry) => {
             const isOpen = openId === entry.id;
             return (
               <li
@@ -2217,6 +2301,7 @@ export default function HistoryPanel() {
                           void handleRefreshName(entry, itemId)
                         }
                         refreshingNameId={refreshingNameId}
+                        query={query}
                       />
                     )}
                   </div>

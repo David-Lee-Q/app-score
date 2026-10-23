@@ -1,4 +1,4 @@
-export const APP_VERSION = "v0.11.4";
+export const APP_VERSION = "v0.11.5";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.11.5",
+    date: "2026-10-23",
+    changes: [
+      "评分历史新增搜索框：按任意字段模糊查询（姓名、手机号、作品ID、应用名称、链接、赛题、综合评价、人工评价等），多个关键词以空格分隔时需同时命中",
+      "搜索时自动隐藏无匹配记录的历史条目，批量记录内仅展示命中的应用行，清空关键词即恢复完整列表",
+    ],
+  },
   {
     version: "v0.11.4",
     date: "2026-10-19",
